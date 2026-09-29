@@ -1,0 +1,21 @@
+version: 1
+project: jarvis-pilot
+sandbox:
+  image: jarvis-sandbox:latest
+  test_command: pytest --tb=short -q
+  timeout_seconds: 300
+  network: none
+models:
+  coder: jarvis-coder-large
+  planner: sokrates-fast
+  reviewer: jarvis-review
+  embedder: jarvis-embed
+limits:
+  max_steps: 60
+  max_repair_loops: 3
+  max_runtime_minutes: 90
+git:
+  base_branch: main
+  branch_prefix: jarvis/
+  pr_draft: true
+  auto_merge: false

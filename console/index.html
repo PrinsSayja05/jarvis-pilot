@@ -1,0 +1,1139 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000005; --glass: rgba(10, 22, 48, .42); --line: rgba(0, 212, 255, .16); --line-2: rgba(0, 212, 255, .34);
+    --text: #dff6ff; --muted: #6f8fb0; --cyan: #00d4ff; --blue: #2f7bff; --violet: #7a5cff;
+    --green: #00ff9d; --red: #ff3b5c; --amber: #ffb020;
+    --mood: var(--cyan);
+    --display: "Orbitron", "Segoe UI", system-ui, sans-serif;
+    --ui: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  body.m-waiting { --mood: var(--amber); } body.m-done { --mood: var(--green); } body.m-failed { --mood: var(--red); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 500 16px/1.5 var(--ui); }
+  body { min-height: 100vh; overflow-x: hidden; padding-bottom: 34px; }
+  a { color: var(--cyan); text-decoration: none; border-bottom: 1px dashed rgba(0,212,255,.5); }
+  a:hover { text-shadow: 0 0 8px var(--cyan); }
+
+  /* ---------- background: starfield, grid, scanlines ---------- */
+  #stars { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  .grid-floor { position: fixed; inset: auto 0 0 0; height: 45vh; z-index: 0; pointer-events: none; opacity: .35;
+    background-image: linear-gradient(rgba(0,212,255,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(0,212,255,.18) 1px, transparent 1px);
+    background-size: 48px 48px; transform: perspective(500px) rotateX(62deg); transform-origin: bottom;
+    mask-image: linear-gradient(to top, #000 0%, transparent 85%); -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 85%); }
+  .vignette { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: radial-gradient(900px 520px at 50% 28%, rgba(0,90,180,.20), transparent 70%); }
+  .scanlines { position: fixed; inset: 0; z-index: 50; pointer-events: none;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,.025) 0 1px, transparent 1px 3px); mix-blend-mode: overlay; }
+  .scanlines::after { content: ""; position: absolute; left: 0; right: 0; top: -20%; height: 18%;
+    background: linear-gradient(to bottom, transparent, rgba(0,212,255,.05), transparent); animation: sweep 7s linear infinite; }
+  @keyframes sweep { to { top: 110%; } }
+  .wrap { position: relative; z-index: 1; max-width: 1040px; margin: 0 auto; padding: 0 16px 40px; }
+
+  /* ---------- HUD corner brackets ---------- */
+  .hud { position: relative; }
+  .hud > .hc { position: absolute; width: 16px; height: 16px; border: 0 solid var(--hud, var(--cyan)); opacity: .8; pointer-events: none; }
+  .hud > .hc.tl { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
+  .hud > .hc.tr { top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; }
+  .hud > .hc.bl { bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; }
+  .hud > .hc.br { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
+
+  /* ---------- header ---------- */
+  header { display: flex; align-items: center; gap: 14px; padding: 20px 0 8px; flex-wrap: wrap; }
+  .brand { font: 900 26px/1 var(--display); letter-spacing: 8px; color: var(--cyan); text-shadow: 0 0 10px rgba(0,212,255,.8), 0 0 30px rgba(0,212,255,.4); }
+  .brand small { display: block; font: 500 10px/1 var(--display); letter-spacing: 5px; color: var(--muted); margin-top: 7px; text-shadow: none; }
+  .spacer { flex: 1; }
+  .conn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); letter-spacing: .5px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); flex: none; }
+  .dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); animation: blip 2s infinite; }
+  @keyframes blip { 50% { opacity: .45; } }
+  .clock { text-align: right; font: 700 16px/1 var(--display); letter-spacing: 2px; color: var(--text); text-shadow: 0 0 8px rgba(0,212,255,.5); }
+  .clock small { display: block; font: 500 10px/1 var(--display); letter-spacing: 2px; color: var(--muted); margin-top: 5px; text-shadow: none; }
+  .lang-btn { display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 999px; cursor: pointer;
+    font: 900 14px/1 var(--display); letter-spacing: 3px; color: #eaffff; border: 1px solid var(--cyan);
+    background: radial-gradient(120% 160% at 50% 0%, rgba(0,212,255,.3), rgba(0,40,90,.5)); text-shadow: 0 0 8px var(--cyan);
+    box-shadow: 0 0 18px rgba(0,212,255,.45), inset 0 0 14px rgba(0,212,255,.25); transition: transform .15s, box-shadow .25s; }
+  .lang-btn:hover { box-shadow: 0 0 30px rgba(0,212,255,.75), inset 0 0 18px rgba(0,212,255,.4); }
+  .lang-btn:active { transform: scale(.95); }
+  .lang-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  .lang-btn .flag { width: 24px; height: 15px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(255,255,255,.35), 0 0 8px rgba(0,0,0,.6); flex: none; }
+
+  /* mic button */
+  .action-row { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .mic { position: relative; width: 66px; height: 66px; border-radius: 50%; flex: none; cursor: pointer; display: grid; place-items: center;
+    color: #ffd6dd; border: 1px solid var(--red); background: radial-gradient(circle at 50% 30%, rgba(255,59,92,.35), rgba(80,0,20,.6));
+    box-shadow: 0 0 20px rgba(255,59,92,.45), inset 0 0 18px rgba(255,59,92,.3); transition: transform .15s, box-shadow .25s; }
+  .mic svg { width: 28px; height: 28px; filter: drop-shadow(0 0 6px rgba(255,59,92,.9)); }
+  .mic:hover:not(:disabled) { box-shadow: 0 0 34px rgba(255,59,92,.75), inset 0 0 22px rgba(255,59,92,.45); }
+  .mic:active:not(:disabled) { transform: scale(.94); }
+  .mic:disabled { cursor: wait; }
+  .mic:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
+  .mic .mic-label { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); white-space: nowrap;
+    font: 700 10px/1 var(--display); letter-spacing: 2px; color: var(--red); text-shadow: 0 0 8px var(--red); }
+  .mic.recording { color: #fff; background: radial-gradient(circle, rgba(255,59,92,.9), rgba(160,0,30,.8)); animation: micpulse 1s ease-out infinite; }
+  .mic.busy { border-color: var(--cyan); color: var(--cyan); background: radial-gradient(circle, rgba(0,212,255,.25), rgba(0,30,60,.7)); box-shadow: 0 0 20px rgba(0,212,255,.4); }
+  .mic.busy .mic-label { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
+  @keyframes micpulse { 0% { box-shadow: 0 0 0 0 rgba(255,59,92,.8), 0 0 30px rgba(255,59,92,.8); } 100% { box-shadow: 0 0 0 26px rgba(255,59,92,0), 0 0 30px rgba(255,59,92,.8); } }
+  .heard { min-height: 22px; font: 600 15px/1.4 var(--ui); color: var(--muted); text-align: center; margin-top: 6px; }
+  .heard b { color: var(--cyan); font-family: var(--display); letter-spacing: 1px; text-shadow: 0 0 8px rgba(0,212,255,.5); }
+  .heard.err { color: var(--red); }
+
+  /* chat drawer */
+  .chat-toggle { position: fixed; right: 18px; bottom: 50px; z-index: 45; display: inline-flex; align-items: center; gap: 9px; padding: 13px 18px;
+    border-radius: 999px; cursor: pointer; font: 700 12px/1 var(--display); letter-spacing: 2.5px; color: #eaffff; border: 1px solid var(--cyan);
+    background: rgba(0,25,55,.85); backdrop-filter: blur(10px); text-shadow: 0 0 8px var(--cyan);
+    box-shadow: 0 0 20px rgba(0,212,255,.45), inset 0 0 14px rgba(0,212,255,.2); transition: box-shadow .25s, transform .15s; }
+  .chat-toggle svg { width: 18px; height: 18px; }
+  .chat-toggle:hover { box-shadow: 0 0 34px rgba(0,212,255,.75), inset 0 0 18px rgba(0,212,255,.35); }
+  .chat-toggle[aria-expanded="true"] { opacity: 0; pointer-events: none; }
+  .chat { position: fixed; top: 16px; right: 16px; bottom: 44px; z-index: 46; width: min(400px, calc(100vw - 32px)); display: flex; flex-direction: column;
+    background: rgba(2,10,26,.92); border: 1px solid var(--line-2); border-radius: 14px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 0 50px rgba(0,212,255,.18), 0 20px 60px rgba(0,0,0,.6); animation: slidein .3s ease-out; }
+  .chat[hidden] { display: none; }
+  @keyframes slidein { from { opacity: 0; transform: translateX(30px); } }
+  .chat-head { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid var(--line); }
+  .chat-head .ptitle { flex: 1; }
+  .chat-x { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line-2); background: transparent; color: var(--cyan); font-size: 20px; line-height: 1; cursor: pointer; }
+  .chat-x:hover { box-shadow: 0 0 14px rgba(0,212,255,.4); }
+  .chat-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .chat-log::-webkit-scrollbar { width: 6px; } .chat-log::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+  .bubble { max-width: 85%; padding: 10px 14px; border-radius: 14px; font: 500 15px/1.45 var(--ui); white-space: pre-wrap; word-break: break-word; }
+  .bubble.user { align-self: flex-end; background: linear-gradient(135deg, rgba(47,123,255,.55), rgba(47,123,255,.3)); border: 1px solid rgba(47,123,255,.7);
+    border-bottom-right-radius: 4px; box-shadow: 0 0 14px rgba(47,123,255,.25); }
+  .bot-row { display: flex; gap: 8px; align-items: flex-end; align-self: flex-start; max-width: 92%; }
+  .bot-row svg { width: 26px; height: 26px; flex: none; color: var(--cyan); filter: drop-shadow(0 0 6px rgba(0,212,255,.8)); }
+  .bubble.bot { background: rgba(0,212,255,.08); border: 1px solid rgba(0,212,255,.45); border-bottom-left-radius: 4px; color: #d8f8ff; box-shadow: 0 0 14px rgba(0,212,255,.15); max-width: none; }
+  .bubble code { font: 13px/1.4 var(--mono); background: rgba(0,0,0,.35); border: 1px solid rgba(0,212,255,.2); border-radius: 4px; padding: 1px 5px; }
+  .bubble pre { margin: 8px 0; padding: 10px; background: rgba(0,0,0,.45); border: 1px solid rgba(0,212,255,.2); border-radius: 8px; overflow-x: auto; white-space: pre; }
+  .bubble pre code { background: none; border: 0; padding: 0; }
+  .bubble b { color: #fff; }
+  .bubble.bot.err { border-color: rgba(255,59,92,.6); color: #ffc9d2; background: rgba(255,59,92,.08); }
+  .typing i { display: inline-block; width: 6px; height: 6px; margin: 0 2px; border-radius: 50%; background: var(--cyan); animation: dots 1s infinite; }
+  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes dots { 0%, 100% { opacity: .2; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+  .chat-empty { color: var(--muted); text-align: center; margin: auto 0; font-size: 14px; letter-spacing: .5px; }
+  .chat-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  .chat-form input { flex: 1; min-width: 0; background: rgba(0,12,30,.8); color: var(--text); border: 1px solid var(--line-2); border-radius: 10px; padding: 12px 14px; font: 500 15px/1.3 var(--ui); }
+  .chat-form input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 16px rgba(0,212,255,.3); }
+  .chat-form button { width: 46px; flex: none; border-radius: 10px; border: 1px solid var(--cyan); background: rgba(0,212,255,.12); color: var(--cyan); cursor: pointer; display: grid; place-items: center; }
+  .chat-form button svg { width: 19px; height: 19px; }
+  .chat-form button:hover:not(:disabled) { box-shadow: 0 0 18px rgba(0,212,255,.5); } .chat-form button:disabled { opacity: .4; cursor: wait; }
+
+  /* ---------- glass panels ---------- */
+  .panel { background: var(--glass); border: 1px solid var(--line); border-radius: 14px; padding: 20px;
+    backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%); margin-top: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 20px 60px rgba(0,0,0,.5); }
+  .ptitle { margin: 0 0 14px; font: 700 12px/1 var(--display); letter-spacing: 3px; color: var(--cyan); text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
+  .ptitle::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-2), transparent); }
+
+  /* ---------- ticket selector ---------- */
+  .ticket-bar { display: flex; gap: 10px; align-items: stretch; margin-top: 14px; }
+  .select-wrap { position: relative; flex: 1; min-width: 0; }
+  .select-wrap::after { content: "▾"; position: absolute; right: 18px; top: 50%; transform: translateY(-50%); color: var(--cyan); pointer-events: none; font-size: 18px; text-shadow: 0 0 8px var(--cyan); }
+  select#ticketSelect { width: 100%; appearance: none; -webkit-appearance: none; background: rgba(0,20,45,.75); color: var(--text);
+    border: 1px solid var(--line-2); border-radius: 12px; padding: 18px 48px 18px 20px; font: 600 19px/1.2 var(--ui); letter-spacing: .4px; cursor: pointer;
+    box-shadow: 0 0 0 1px rgba(0,212,255,.08), 0 0 24px rgba(0,212,255,.18), inset 0 0 22px rgba(0,212,255,.08); transition: box-shadow .25s, border-color .25s; }
+  select#ticketSelect:hover, select#ticketSelect:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 36px rgba(0,212,255,.45), inset 0 0 26px rgba(0,212,255,.14); }
+  select option { background: #020818; color: var(--text); }
+  .icon-btn { width: 62px; flex: none; border-radius: 12px; border: 1px solid var(--line-2); background: rgba(0,20,45,.75); color: var(--cyan); font-size: 22px; cursor: pointer; transition: box-shadow .2s, transform .3s; }
+  .icon-btn:hover { box-shadow: 0 0 22px rgba(0,212,255,.45); }
+  .icon-btn:active { transform: rotate(180deg); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- reactor / stage ---------- */
+  .stage { position: relative; display: grid; place-items: center; margin: 22px auto 0; width: min(440px, 100%); aspect-ratio: 1; }
+  .stage > *:not(.hc) { grid-area: 1 / 1; }
+  .stage.hud { --hud: var(--mood); }
+  svg.orbits { width: 100%; height: 100%; overflow: visible; }
+  .orbits circle { fill: none; stroke: var(--mood); transition: stroke .6s, opacity .6s; }
+  .orbits .o1 { stroke-width: 1.5; stroke-dasharray: 2 10; opacity: .55; }
+  .orbits .o2 { stroke-width: 3; stroke-dasharray: 120 40 20 40; opacity: .75; filter: drop-shadow(0 0 6px var(--mood)); }
+  .orbits .o3 { stroke-width: 1; opacity: .35; }
+  .orbits .o4 { stroke-width: 6; stroke-dasharray: 3 7; opacity: .4; }
+  .orbits .o5 { stroke-width: 2; stroke-dasharray: 60 300; opacity: .9; filter: drop-shadow(0 0 8px var(--mood)); }
+  .orbits g { transform-origin: 200px 200px; transform-box: view-box; }
+  .orbits .spin-a { animation: spin 40s linear infinite; } .orbits .spin-b { animation: spin 18s linear infinite reverse; }
+  .orbits .spin-c { animation: spin 26s linear infinite; } .orbits .spin-d { animation: spin 7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .working .orbits .spin-b { animation-duration: 5s; } .working .orbits .spin-d { animation-duration: 1.6s; } .working .orbits .spin-c { animation-duration: 8s; }
+  .idle .orbits circle { opacity: .45; }
+
+  .ripples { position: relative; width: 44%; aspect-ratio: 1; pointer-events: none; }
+  .ripples i { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--mood); opacity: 0; }
+  .working .ripples i, .waiting .ripples i { animation: ripple 3.2s cubic-bezier(.2,.6,.3,1) infinite; }
+  .ripples i:nth-child(2) { animation-delay: .8s !important; } .ripples i:nth-child(3) { animation-delay: 1.6s !important; } .ripples i:nth-child(4) { animation-delay: 2.4s !important; }
+  .waiting .ripples i { animation-duration: 4.5s; }
+  @keyframes ripple { 0% { transform: scale(.9); opacity: .9; box-shadow: 0 0 20px var(--mood); } 100% { transform: scale(2.35); opacity: 0; } }
+  .burst i { animation: ripple 1.2s cubic-bezier(.2,.6,.3,1) 1 !important; }
+
+  .core-glow { width: 50%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--mood) 35%, transparent) 0%, transparent 68%);
+    opacity: .35; transition: opacity .6s; animation: breathe 4s ease-in-out infinite; }
+  .working .core-glow, .done .core-glow, .failed .core-glow, .waiting .core-glow { opacity: .9; }
+  @keyframes breathe { 50% { transform: scale(1.12); } }
+
+  /* robot */
+  svg.head { width: 36%; overflow: visible; transition: filter .6s, opacity .6s; opacity: .55; filter: drop-shadow(0 0 4px rgba(0,212,255,.3)); }
+  .head .shell { fill: rgba(4,14,32,.92); stroke: var(--mood); stroke-width: 2.5; transition: stroke .6s; }
+  .head .trim { fill: none; stroke: var(--mood); stroke-width: 1.2; opacity: .55; transition: stroke .6s; }
+  .head .visor { fill: rgba(0,10,25,.95); stroke: var(--mood); stroke-width: 1.5; transition: stroke .6s; }
+  .head .eye { fill: var(--mood); transition: fill .6s; transform-box: fill-box; transform-origin: center; }
+  .head .mouth rect { fill: var(--mood); transition: fill .6s; transform-box: fill-box; transform-origin: center; }
+  .head .ant { stroke: var(--mood); fill: var(--mood); transition: stroke .6s, fill .6s; }
+  .head .led { transition: fill .6s; animation: led 1.8s steps(1) infinite; }
+  .head .led.l1 { fill: var(--mood); } .head .led.l2 { fill: var(--amber); animation-delay: .6s; } .head .led.l3 { fill: var(--green); animation-delay: 1.2s; }
+  .head .led.l4 { fill: var(--mood); animation-duration: 1.1s; } .head .led.l5 { fill: var(--mood); animation-duration: 1.1s; animation-delay: .55s; }
+  @keyframes led { 0%, 55% { opacity: 1; } 56%, 100% { opacity: .15; } }
+  .working .head .led { animation-duration: .5s; } .working .head .led.l2 { animation-delay: .17s; } .working .head .led.l3 { animation-delay: .34s; }
+  .done .head .led, .failed .head .led { fill: var(--mood); animation-duration: 1s; }
+  .idle svg.head { animation: float 5s ease-in-out infinite; }
+  .idle .head .eye { opacity: .6; animation: blink 6s infinite; }
+  .working svg.head, .waiting svg.head { opacity: 1; filter: drop-shadow(0 0 10px var(--mood)) drop-shadow(0 0 28px var(--mood)); animation: float 2.4s ease-in-out infinite; }
+  .working .head .eye { animation: scan 1.6s ease-in-out infinite; }
+  .working .head .mouth rect { animation: talk .5s ease-in-out infinite; }
+  .working .head .mouth rect:nth-child(2) { animation-delay: .1s; } .working .head .mouth rect:nth-child(3) { animation-delay: .2s; }
+  .working .head .mouth rect:nth-child(4) { animation-delay: .3s; } .working .head .mouth rect:nth-child(5) { animation-delay: .15s; }
+  .working .head .ant circle { animation: blip .6s infinite; }
+  .waiting .head .eye { animation: blink 3s infinite; }
+  .done svg.head { opacity: 1; filter: drop-shadow(0 0 12px var(--green)) drop-shadow(0 0 34px var(--green)); animation: pop .6s ease-out; }
+  .done .head .eye { transform: scaleY(.45); }
+  .failed svg.head { opacity: 1; filter: drop-shadow(0 0 12px var(--red)) drop-shadow(0 0 34px var(--red)); animation: shake .5s 2; }
+  .failed .head .eye { transform: scaleY(.25) rotate(8deg); }
+  @keyframes float { 50% { transform: translateY(-6px); } }
+  @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+  @keyframes scan { 0%, 100% { transform: translateX(-3px); } 50% { transform: translateX(3px); } }
+  @keyframes talk { 50% { transform: scaleY(2.4); } }
+  @keyframes pop { 0% { transform: scale(.85); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+
+  .status-line { text-align: center; margin-top: 4px; }
+  .phase { font: 700 20px/1.3 var(--display); letter-spacing: 4px; color: var(--mood); text-transform: uppercase; margin: 0; text-shadow: 0 0 14px var(--mood); transition: color .6s; }
+  .phase small { display: block; font: 500 13px/1.6 var(--ui); letter-spacing: 2px; color: var(--muted); text-shadow: none; }
+  canvas#wave { display: block; width: 100%; height: 90px; margin-top: 4px; }
+
+  /* progress */
+  .progress { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+  .progress .track { flex: 1; height: 8px; border-radius: 4px; background: rgba(0,212,255,.08); border: 1px solid var(--line); overflow: hidden; position: relative; }
+  .progress .fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), var(--mood)); box-shadow: 0 0 14px var(--mood); transition: width .6s ease, background .6s; position: relative; }
+  .progress .fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent); animation: shimmer 1.6s linear infinite; }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .progress .pct { min-width: 58px; text-align: right; font: 700 16px/1 var(--display); color: var(--mood); text-shadow: 0 0 10px var(--mood); letter-spacing: 1px; }
+  .steps { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin-top: 10px; }
+  .step { text-align: center; font: 600 11px/1.2 var(--ui); color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  .step .bar { height: 4px; border-radius: 2px; background: rgba(0,212,255,.1); margin-bottom: 6px; transition: background .4s, box-shadow .4s; }
+  .step.done .bar { background: var(--blue); box-shadow: 0 0 8px var(--blue); }
+  .step.current { color: var(--cyan); }
+  .step.current .bar { background: var(--cyan); box-shadow: 0 0 14px var(--cyan); animation: blip .9s infinite; }
+  .step.failed { color: var(--red); } .step.failed .bar { background: var(--red); box-shadow: 0 0 14px var(--red); }
+  .step.allgreen .bar { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .step.skipped .bar { background: rgba(255,255,255,.05); }
+  .stepnum { display: none; }
+
+  /* ---------- controls ---------- */
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 18px; margin-top: 20px; }
+  .holo-toggle { position: relative; display: inline-flex; align-items: center; gap: 14px; cursor: pointer; user-select: none; padding: 10px 18px;
+    border: 1px solid var(--line); border-radius: 999px; background: rgba(0,20,45,.5); transition: border-color .3s, box-shadow .3s; }
+  .holo-toggle:hover { border-color: var(--line-2); box-shadow: 0 0 18px rgba(0,212,255,.15); }
+  .holo-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .holo-toggle .track { position: relative; width: 58px; height: 26px; border-radius: 999px; border: 1px solid var(--line-2);
+    background: repeating-linear-gradient(90deg, rgba(0,212,255,.08) 0 2px, transparent 2px 6px); transition: all .3s; }
+  .holo-toggle .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; transition: transform .3s, background .3s, box-shadow .3s; }
+  .holo-toggle input:checked + .track { border-color: var(--cyan); box-shadow: 0 0 14px rgba(0,212,255,.5), inset 0 0 10px rgba(0,212,255,.3); }
+  .holo-toggle input:checked + .track::after { transform: translateX(32px); background: var(--cyan); box-shadow: 0 0 12px var(--cyan), 0 0 24px var(--cyan); }
+  .holo-toggle input:not(:checked) + .track { border-color: var(--amber); }
+  .holo-toggle input:not(:checked) + .track::after { background: var(--amber); box-shadow: 0 0 12px var(--amber); }
+  .holo-toggle input:focus-visible + .track { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  .toggle-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .toggle-text b { font: 700 12px/1.3 var(--display); letter-spacing: 2px; color: var(--text); }
+  .toggle-text span { font-size: 13px; color: var(--muted); }
+
+  .activate { position: relative; font: 900 18px/1 var(--display); letter-spacing: 6px; color: #eaffff; padding: 22px 46px; min-width: min(380px, 100%);
+    border: 1px solid var(--cyan); border-radius: 999px; cursor: pointer; overflow: hidden;
+    background: radial-gradient(120% 180% at 50% 0%, rgba(0,212,255,.35), rgba(0,60,140,.35) 55%, rgba(0,10,30,.8));
+    text-shadow: 0 0 10px var(--cyan); box-shadow: 0 0 22px rgba(0,212,255,.55), 0 0 60px rgba(0,120,255,.3), inset 0 0 24px rgba(0,212,255,.35);
+    transition: transform .15s, box-shadow .3s, opacity .3s; animation: idleglow 3s ease-in-out infinite; }
+  .activate::before { content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.35), transparent); transform: skewX(-20deg); animation: sheen 3.6s ease-in-out infinite; }
+  .activate:hover:not(:disabled) { box-shadow: 0 0 34px rgba(0,212,255,.8), 0 0 90px rgba(0,120,255,.45), inset 0 0 30px rgba(0,212,255,.45); }
+  .activate:active:not(:disabled) { transform: scale(.97); }
+  .activate:disabled { cursor: not-allowed; opacity: .4; animation: none; }
+  .activate:disabled::before { display: none; }
+  .activate.pulse { animation: clickpulse .9s ease-out; }
+  .activate.engaged:disabled { opacity: .85; animation: engaged 1.4s ease-in-out infinite; }
+  @keyframes idleglow { 50% { box-shadow: 0 0 30px rgba(0,212,255,.75), 0 0 80px rgba(0,120,255,.4), inset 0 0 28px rgba(0,212,255,.4); } }
+  @keyframes engaged { 50% { box-shadow: 0 0 40px rgba(0,212,255,.9), 0 0 110px rgba(0,120,255,.6), inset 0 0 36px rgba(0,212,255,.6); } }
+  @keyframes clickpulse { 0% { box-shadow: 0 0 0 0 rgba(0,212,255,.9), 0 0 60px rgba(0,212,255,.8); } 100% { box-shadow: 0 0 0 36px rgba(0,212,255,0), 0 0 20px rgba(0,212,255,.3); } }
+  @keyframes sheen { 0%, 60% { left: -60%; } 100% { left: 130%; } }
+  .msg { font-size: 15px; min-height: 22px; text-align: center; }
+  .msg.ok { color: var(--green); } .msg.err { color: var(--red); text-shadow: 0 0 8px rgba(255,59,92,.4); }
+
+  /* ---------- live log ---------- */
+  #live { display: none; } #live.show { display: block; animation: rise .5s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  #log { background: rgba(0,4,12,.8); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; height: 260px; overflow: auto;
+    font: 13px/1.7 var(--mono); box-shadow: inset 0 0 30px rgba(0,212,255,.05); }
+  #log::-webkit-scrollbar { width: 6px; } #log::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+  #log div { white-space: pre-wrap; word-break: break-word; }
+  #log .t { color: #3d6a8a; } #log .s { color: var(--cyan); text-shadow: 0 0 6px rgba(0,212,255,.5); font-weight: 600; }
+  #log .e { color: var(--red); } #log .g { color: var(--green); } #log .m { color: #b8d8ef; }
+  #log .caret::after { content: "▌"; color: var(--cyan); animation: blip .7s steps(1) infinite; margin-left: 1px; }
+
+  /* ---------- approval ---------- */
+  #approval { display: none; --hud: var(--amber); border-color: rgba(255,176,32,.45); box-shadow: 0 0 40px rgba(255,176,32,.12), inset 0 0 40px rgba(255,176,32,.04); }
+  #approval.show { display: block; animation: rise .5s ease-out; }
+  #approval .ptitle { color: var(--amber); } #approval .ptitle::after { background: linear-gradient(90deg, rgba(255,176,32,.5), transparent); }
+  .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .plan-grid .full { grid-column: 1 / -1; }
+  .lbl-sm { font: 700 10px/1 var(--display); letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+  #planApproach { margin: 0; font-size: 17px; line-height: 1.5; }
+  #approval ul { margin: 0; padding-left: 18px; } #approval li { margin-bottom: 4px; } #approval li::marker { color: var(--amber); }
+  #approval li strong { font-family: var(--mono); font-size: 13px; color: var(--cyan); font-weight: 500; }
+  .risk { display: inline-block; padding: 4px 12px; border-radius: 4px; font: 700 11px/1 var(--display); letter-spacing: 2px; text-transform: uppercase; border: 1px solid currentColor; }
+  .risk.low { color: var(--green); background: rgba(0,255,157,.08); } .risk.medium { color: var(--amber); background: rgba(255,176,32,.08); } .risk.high { color: var(--red); background: rgba(255,59,92,.1); }
+  .status-text { color: var(--muted); font-size: 14px; }
+  .approve-row { display: flex; gap: 18px; margin-top: 22px; flex-wrap: wrap; }
+  .big { flex: 1; min-width: 180px; font: 900 18px/1 var(--display); letter-spacing: 5px; padding: 24px 20px; border-radius: 12px; cursor: pointer; background: transparent; transition: transform .15s, box-shadow .3s, background .3s; }
+  .big:active:not(:disabled) { transform: scale(.97); } .big:disabled { opacity: .4; cursor: not-allowed; }
+  .big.approve { color: var(--green); border: 2px solid var(--green); text-shadow: 0 0 12px var(--green); background: rgba(0,255,157,.07);
+    box-shadow: 0 0 24px rgba(0,255,157,.35), inset 0 0 24px rgba(0,255,157,.15); animation: gpulse 2s ease-in-out infinite; }
+  .big.approve:hover:not(:disabled) { background: rgba(0,255,157,.16); box-shadow: 0 0 50px rgba(0,255,157,.6), inset 0 0 30px rgba(0,255,157,.25); }
+  .big.reject { color: var(--red); border: 2px solid var(--red); text-shadow: 0 0 12px var(--red); background: rgba(255,59,92,.07); box-shadow: 0 0 24px rgba(255,59,92,.3), inset 0 0 24px rgba(255,59,92,.12); }
+  .big.reject:hover:not(:disabled) { background: rgba(255,59,92,.16); box-shadow: 0 0 50px rgba(255,59,92,.55), inset 0 0 30px rgba(255,59,92,.25); }
+  @keyframes gpulse { 50% { box-shadow: 0 0 40px rgba(0,255,157,.55), inset 0 0 30px rgba(0,255,157,.25); } }
+
+  /* ---------- result ---------- */
+  #result { display: none; }
+  #result.show { display: block; animation: rise .5s ease-out; }
+  #result.ok { --hud: var(--green); border-color: rgba(0,255,157,.4); box-shadow: 0 0 50px rgba(0,255,157,.12), inset 0 0 50px rgba(0,255,157,.04); }
+  #result.bad { --hud: var(--red); border-color: rgba(255,59,92,.45); box-shadow: 0 0 50px rgba(255,59,92,.14), inset 0 0 50px rgba(255,59,92,.05); }
+  #result h3 { margin: 0 0 16px; font: 700 17px/1.3 var(--display); letter-spacing: 2px; }
+  #result.ok h3 { color: var(--green); text-shadow: 0 0 12px rgba(0,255,157,.5); } #result.bad h3 { color: var(--red); text-shadow: 0 0 12px rgba(255,59,92,.5); }
+  #result dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 0; }
+  #result dl > div { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07); border-radius: 10px; padding: 12px 14px; }
+  #result dl > div.wide { grid-column: 1 / -1; }
+  #result dt { font: 700 10px/1 var(--display); letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+  #result dd { margin: 0; word-break: break-word; font-size: 16px; }
+
+  /* ---------- create ticket ---------- */
+  details.panel > summary { list-style: none; cursor: pointer; }
+  details.panel > summary::-webkit-details-marker { display: none; }
+  details.panel > summary .ptitle { margin: 0; }
+  details.panel > summary .ptitle::before { content: "+"; font-size: 16px; color: var(--cyan); width: 12px; }
+  details.panel[open] > summary .ptitle::before { content: "−"; }
+  details.panel[open] > summary .ptitle { margin-bottom: 14px; }
+  label.fl { display: block; font: 700 10px/1 var(--display); letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; margin: 14px 0 8px; }
+  input[type=text], textarea { width: 100%; background: rgba(0,12,30,.7); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font: 500 16px/1.4 var(--ui); }
+  textarea { min-height: 90px; resize: vertical; }
+  input[type=text]:focus, textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 18px rgba(0,212,255,.25); }
+  .btn { font: 700 13px/1 var(--display); letter-spacing: 3px; color: var(--cyan); background: rgba(0,212,255,.08); border: 1px solid var(--cyan); padding: 14px 22px; border-radius: 10px; cursor: pointer; transition: box-shadow .2s; margin-top: 14px; }
+  .btn:hover:not(:disabled) { box-shadow: 0 0 22px rgba(0,212,255,.45); } .btn:disabled { opacity: .45; cursor: not-allowed; }
+  #createMsg { text-align: left; margin-top: 10px; }
+
+  /* ---------- history ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font: 700 10px/1 var(--display); letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
+  td { padding: 12px; border-bottom: 1px solid rgba(0,212,255,.07); }
+  tbody tr { transition: background .2s; } tbody tr:hover { background: rgba(0,212,255,.05); }
+  tr:last-child td { border-bottom: 0; }
+  td.mono { font-family: var(--mono); font-size: 13px; }
+  .pill { display: inline-block; padding: 4px 10px; border-radius: 4px; font: 700 10px/1 var(--display); letter-spacing: 1.5px; text-transform: uppercase; border: 1px solid currentColor; }
+  .pill.done { color: var(--green); background: rgba(0,255,157,.07); } .pill.failed { color: var(--red); background: rgba(255,59,92,.08); }
+  .pill.cancelled { color: var(--muted); } .pill.running, .pill.awaiting_approval { color: var(--cyan); background: rgba(0,212,255,.08); }
+  .dry { font-size: 11px; color: var(--muted); margin-left: 6px; letter-spacing: 1px; }
+  .empty { color: var(--muted); text-align: center; padding: 16px; letter-spacing: 1px; }
+
+  /* ---------- quick links ---------- */
+  .links { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .qlink { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 18px 12px; border: 1px solid var(--line-2); border-radius: 12px;
+    background: rgba(0,20,45,.55); color: var(--cyan); font: 700 13px/1 var(--display); letter-spacing: 3px; text-shadow: 0 0 8px rgba(0,212,255,.5);
+    box-shadow: 0 0 14px rgba(0,212,255,.12), inset 0 0 18px rgba(0,212,255,.06); transition: transform .15s, box-shadow .25s, border-color .25s, background .25s; }
+  .qlink:hover { border-color: var(--cyan); background: rgba(0,212,255,.1); transform: translateY(-2px); text-shadow: 0 0 12px var(--cyan);
+    box-shadow: 0 0 30px rgba(0,212,255,.45), inset 0 0 24px rgba(0,212,255,.15); }
+  .qlink:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  .qlink svg { width: 20px; height: 20px; flex: none; filter: drop-shadow(0 0 6px rgba(0,212,255,.7)); }
+  .qlink .ext { font-size: 11px; opacity: .6; }
+
+  /* ---------- system status bar ---------- */
+  .sysbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; justify-content: center; gap: 0;
+    padding: 7px 16px; background: rgba(0,6,16,.88); border-top: 1px solid var(--line); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    font: 500 10.5px/1.2 var(--display); letter-spacing: 1.5px; color: var(--muted); white-space: nowrap; overflow-x: auto; }
+  .sysbar span { display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; border-right: 1px solid var(--line); }
+  .sysbar span:last-child { border-right: 0; }
+  .sysbar i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: blip 2.4s infinite; }
+  .sysbar b { color: var(--text); font-weight: 700; }
+
+  @media (max-width: 640px) {
+    .brand { font-size: 20px; letter-spacing: 5px; }
+    .clock { font-size: 13px; } .conn { order: 5; width: 100%; }
+    select#ticketSelect { font-size: 16px; padding: 15px 42px 15px 14px; }
+    .icon-btn { width: 52px; }
+    .activate { font-size: 14px; letter-spacing: 3px; padding: 20px 22px; }
+    .step .lbl { display: none; } .stepnum { display: block; }
+    .plan-grid { grid-template-columns: 1fr; }
+    .big { font-size: 15px; letter-spacing: 3px; }
+    .links { grid-template-columns: repeat(2, 1fr); }
+    th:nth-child(3), td:nth-child(3) { display: none; }
+    .sysbar { justify-content: flex-start; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body class="m-idle">
+<canvas id="stars" aria-hidden="true"></canvas>
+<div class="grid-floor" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+<div class="scanlines" aria-hidden="true"></div>
+
+<div class="wrap">
+  <header>
+    <div class="brand">J.A.R.V.I.S<small>WAMOCON SYSTEMS</small></div>
+    <div class="spacer"></div>
+    <div class="conn"><span id="dot" class="dot" role="status"></span><span id="conn"></span></div>
+    <div class="clock" aria-live="off"><span id="clockTime">--:--:--</span><small id="clockDate"></small></div>
+    <button id="langBtn" class="lang-btn" type="button">
+      <svg class="flag" id="flagDe" viewBox="0 0 5 3" aria-hidden="true"><rect width="5" height="1" fill="#000"/><rect y="1" width="5" height="1" fill="#DD0000"/><rect y="2" width="5" height="1" fill="#FFCE00"/></svg>
+      <svg class="flag" id="flagEn" viewBox="0 0 60 30" aria-hidden="true" hidden><clipPath id="uk"><path d="M0 0v30h60V0z"/></clipPath><g clip-path="url(#uk)"><path d="M0 0v30h60V0z" fill="#012169"/><path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30m0-30L0 30" stroke="#C8102E" stroke-width="4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></g></svg>
+      <span id="langCode">DE</span>
+    </button>
+  </header>
+
+  <div class="ticket-bar">
+    <div class="select-wrap">
+      <label for="ticketSelect" class="sr" data-i18n="selectTicket"></label>
+      <select id="ticketSelect"><option value="" data-i18n="loadingTickets"></option></select>
+    </div>
+    <button id="reloadBtn" class="icon-btn" type="button" data-i18n-title="reload" data-i18n-aria="reload">↻</button>
+  </div>
+
+  <div id="stage" class="stage idle hud">
+    <div class="core-glow" aria-hidden="true"></div>
+    <svg class="orbits" viewBox="0 0 400 400" aria-hidden="true">
+      <g class="spin-a"><circle class="o1" cx="200" cy="200" r="190"/></g>
+      <g class="spin-c"><circle class="o4" cx="200" cy="200" r="168"/></g>
+      <circle class="o3" cx="200" cy="200" r="150"/>
+      <g class="spin-b"><circle class="o2" cx="200" cy="200" r="136"/></g>
+      <g class="spin-d"><circle class="o5" cx="200" cy="200" r="118"/></g>
+    </svg>
+    <div id="ripples" class="ripples" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <svg class="head" viewBox="0 0 120 160" role="img" aria-label="JARVIS">
+      <g class="ant"><line x1="60" y1="4" x2="60" y2="20" stroke-width="3" stroke-linecap="round"/><circle cx="60" cy="5" r="4.5"/></g>
+      <rect class="shell" x="12" y="20" width="96" height="84" rx="26"/>
+      <rect class="shell" x="2" y="48" width="10" height="28" rx="4"/>
+      <rect class="shell" x="108" y="48" width="10" height="28" rx="4"/>
+      <circle class="led l4" cx="7" cy="56" r="2"/><circle class="led l5" cx="113" cy="56" r="2"/>
+      <path class="trim" d="M26 28 Q60 18 94 28"/>
+      <rect class="visor" x="24" y="40" width="72" height="30" rx="15"/>
+      <rect class="eye" x="36" y="49" width="16" height="12" rx="6"/>
+      <rect class="eye" x="68" y="49" width="16" height="12" rx="6"/>
+      <g class="mouth">
+        <rect x="44" y="84" width="4" height="6" rx="2"/><rect x="51" y="84" width="4" height="6" rx="2"/><rect x="58" y="84" width="4" height="6" rx="2"/>
+        <rect x="65" y="84" width="4" height="6" rx="2"/><rect x="72" y="84" width="4" height="6" rx="2"/>
+      </g>
+      <rect class="shell" x="48" y="104" width="24" height="10" rx="3"/>
+      <path class="shell" d="M22 150 Q22 116 60 114 Q98 116 98 150 Z"/>
+      <rect class="trim" x="44" y="124" width="32" height="18" rx="4"/>
+      <circle class="led l1" cx="52" cy="133" r="3"/><circle class="led l2" cx="60" cy="133" r="3"/><circle class="led l3" cx="68" cy="133" r="3"/>
+    </svg>
+  </div>
+
+  <div class="status-line">
+    <p id="phase" class="phase" aria-live="polite"></p>
+    <canvas id="wave" aria-hidden="true"></canvas>
+  </div>
+  <div class="progress" aria-hidden="true"><div class="track"><div id="progFill" class="fill"></div></div><div id="progPct" class="pct">0%</div></div>
+  <div id="steps" class="steps" role="list"></div>
+
+  <div class="controls">
+    <label class="holo-toggle">
+      <input id="dryRun" type="checkbox" checked>
+      <span class="track"></span>
+      <span class="toggle-text"><b id="dryTitle"></b><span id="dryLabel"></span></span>
+    </label>
+    <div class="action-row">
+      <button id="startBtn" class="activate" type="button" disabled data-i18n="activate"></button>
+      <button id="micBtn" class="mic" type="button" data-i18n-title="micTitle" data-i18n-aria="micTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8"/></svg>
+        <span id="micLabel" class="mic-label"></span>
+      </button>
+    </div>
+    <div id="heard" class="heard" aria-live="polite"></div>
+    <div id="runMsg" class="msg" aria-live="polite"></div>
+  </div>
+
+  <section id="live" class="panel hud" aria-labelledby="h-live">
+    <h2 id="h-live" class="ptitle" data-i18n="telemetry"></h2>
+    <div id="log" role="log" aria-live="polite"></div>
+  </section>
+
+  <section id="approval" class="panel hud" aria-labelledby="h-appr">
+    <h2 id="h-appr" class="ptitle" data-i18n="awaiting"></h2>
+    <div class="plan-grid">
+      <div class="full"><div class="lbl-sm" data-i18n="approach"></div><p id="planApproach"></p></div>
+      <div><div class="lbl-sm" data-i18n="files"></div><ul id="planFiles"></ul></div>
+      <div><div class="lbl-sm" data-i18n="testPlan"></div><ul id="planTests"></ul></div>
+      <div class="full"><span class="lbl-sm" style="margin-right:10px" data-i18n="risk"></span><span id="planRisk" class="risk"></span> &nbsp; <span id="planTokens" class="status-text"></span></div>
+    </div>
+    <div class="approve-row">
+      <button id="approveBtn" class="big approve" type="button" data-i18n="approve"></button>
+      <button id="rejectBtn" class="big reject" type="button" data-i18n="reject"></button>
+    </div>
+  </section>
+
+  <section id="result" class="panel hud" aria-live="polite"></section>
+
+  <div class="hud" style="margin-top:18px"><!-- corners live outside <details>: a closed details hides its other children -->
+    <details class="panel" style="margin-top:0">
+      <summary><h2 class="ptitle" data-i18n="createTicket"></h2></summary>
+      <label for="summary" class="fl" data-i18n="summaryLbl"></label>
+      <input id="summary" type="text" maxlength="255" data-i18n-ph="summaryPh">
+      <label for="description" class="fl" data-i18n="descLbl"></label>
+      <textarea id="description" data-i18n-ph="descPh"></textarea>
+      <button id="createBtn" class="btn" type="button" data-i18n="createBtn"></button>
+      <div id="createMsg" class="msg" aria-live="polite"></div>
+    </details>
+  </div>
+
+  <section class="panel hud" aria-labelledby="h-hist">
+    <h2 id="h-hist" class="ptitle" data-i18n="missionLog"></h2>
+    <div id="history"></div>
+  </section>
+
+  <section class="panel hud" aria-labelledby="h-links">
+    <h2 id="h-links" class="ptitle" data-i18n="quickAccess"></h2>
+    <nav class="links">
+      <a class="qlink" href="https://wamocon.atlassian.net/jira/software/c/projects/JW/boards/907" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 2 3 11l4 4 5-5 5 5 4-4z"/><path d="m7 15 5 5 5-5"/></svg>JIRA<span class="ext">↗</span></a>
+      <a class="qlink" href="https://github.com/PrinsSayja05/wamocon-test-app" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>GITHUB<span class="ext">↗</span></a>
+      <a class="qlink" href="http://192.168.178.75:4000" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>LITELLM<span class="ext">↗</span></a>
+      <a class="qlink" href="http://192.168.178.75:9010" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12v7c0 1.66 3.58 3 8 3s8-1.34 8-3v-7"/></svg>MINIO<span class="ext">↗</span></a>
+    </nav>
+  </section>
+</div>
+
+<button id="chatToggle" class="chat-toggle" type="button" aria-expanded="false" aria-controls="chat">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>
+  <span>JARVIS CHAT</span>
+</button>
+<aside id="chat" class="chat hud" aria-label="JARVIS Chat" hidden>
+  <div class="chat-head">
+    <span class="ptitle" style="margin:0">JARVIS CHAT</span>
+    <button id="chatClose" class="chat-x" type="button" data-i18n-aria="close">×</button>
+  </div>
+  <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
+  <form id="chatForm" class="chat-form">
+    <input id="chatInput" type="text" maxlength="4000" autocomplete="off" data-i18n-ph="chatPh" data-i18n-aria="chatPh">
+    <button id="chatSend" type="submit" data-i18n-aria="send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
+    </button>
+  </form>
+</aside>
+
+<footer class="sysbar" aria-label="System status">
+  <span><i></i><b>SOKRATES-1</b> 192.168.178.75</span>
+  <span>LiteLLM :4000</span>
+  <span>MinIO :9010</span>
+  <span>vLLM CAESAR :8100</span>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const HOST = "localhost:8090";
+  // Opened as a file, the API is on localhost:8090; served by the backend, it is the same origin.
+  const API = location.protocol === "http:" || location.protocol === "https:" ? location.origin : "http://" + HOST;
+  const WS = API.replace(/^http/, "ws");
+  const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  const safeUrl = (u) => (typeof u === "string" && /^https:\/\//i.test(u)) ? u : null;
+
+  /* ---------- i18n ---------- */
+  const I18N = {
+    de: {
+      standby: "STEHBEREIT", standbySub: "Ticket auswählen und aktivieren", activate: "AKTIVIERE JARVIS",
+      createTicket: "NEUES TICKET", missionLog: "MISSION LOG", fullRun: "VOLLSTÄNDIGER LAUF", fullRunSub: "Öffnet einen Draft-PR, kommentiert Jira",
+      dryRun: "TROCKENLAUF", dryRunSub: "Nur Plan, keine Codeänderung", approve: "PLAN GENEHMIGEN", reject: "ABLEHNEN",
+      complete: "MISSION ABGESCHLOSSEN", failed: "MISSION FEHLGESCHLAGEN", selectTicket: "Ticket auswählen...",
+      connected: "Verbunden", disconnected: "Getrennt – starten: python -m jarvis console",
+      loadingTickets: "Tickets werden geladen…", noTickets: "Keine offenen Tickets in JW", ticketsFailed: "Tickets konnten nicht geladen werden",
+      reload: "Tickets neu laden", telemetry: "Live-Telemetrie", awaiting: "Freigabe erforderlich", approach: "Vorgehen",
+      files: "Zu ändernde Dateien", testPlan: "Testplan", risk: "Risiko", tokens: "Tokens",
+      summaryLbl: "Zusammenfassung", summaryPh: "z. B. calculate_tax-Funktion zu app.py hinzufügen", descLbl: "Beschreibung",
+      descPh: "Was soll sich ändern? Anforderungen und gewünschte Tests angeben.", createBtn: "IN JW ERSTELLEN", creating: "Wird erstellt…",
+      created: "Erstellt", summaryShort: "Bitte eine Zusammenfassung eingeben (mind. 3 Zeichen).", createFailed: "Ticket konnte nicht erstellt werden",
+      quickAccess: "Schnellzugriff", colTicket: "Ticket", colStatus: "Status", colDuration: "Dauer", colPr: "Pull Request",
+      noRuns: "Noch keine Missionen protokolliert.", historyOffline: "Verlauf offline nicht verfügbar.",
+      initializing: "Initialisiere {t}", stepOf: "Schritt {i} von {n}", awaitingSub: "Plan unten prüfen", repair: "Reparatur",
+      repairSub: "fehlschlagende Tests werden repariert", aborted: "Abgebrochen", planRejected: "Plan abgelehnt", seeDetails: "Details siehe unten",
+      dryDone: "✓ TROCKENLAUF ABGESCHLOSSEN — Plan genehmigt, kein Code geändert", finished: "✓ JARVIS FERTIG", runFailed: "✕ LAUF FEHLGESCHLAGEN",
+      rejectedTitle: "PLAN ABGELEHNT", nothingChanged: "Es wurde nichts geändert.", outcome: "Ergebnis", error: "Fehler",
+      duration: "Dauer", approvedBy: "Genehmigt von", pr: "Pull Request", tests: "Tests", judge: "Judge", unknownError: "unbekannter Fehler",
+      testsLine: "{ok} · {p} bestanden, {f} fehlgeschlagen, {e} Fehler · {s}s", testsOk: "✓ bestanden", testsBad: "✕ fehlgeschlagen", repairs: " · {n} Reparaturversuch(e)",
+      logStarted: "JARVIS online. Lauf {id} für {t} gestartet", logDry: " (Trockenlauf)", logPlanReady: "Plan bereit – warte auf Freigabe",
+      logApproved: "Freigabe erteilt – Plan genehmigt", logRejected: "Freigabe verweigert – Plan abgelehnt", logComplete: "Mission abgeschlossen",
+      logApprovalFailed: "Freigabe fehlgeschlagen: ", couldNotStart: "Start fehlgeschlagen: ", ticketsPrefix: "Tickets: ",
+      confirmFull: "Vollständiger Lauf für {t}: Nach Ihrer Freigabe pusht JARVIS einen Branch, öffnet einen Draft-PR und kommentiert das Jira-Ticket. Fortfahren?",
+      st_done: "fertig", st_failed: "fehlgeschlagen", st_cancelled: "abgebrochen", st_running: "läuft", st_awaiting_approval: "wartet auf Freigabe", dry: "TROCKEN",
+      micTitle: "Ticket per Sprache wählen (5 Sekunden)", micRec: "AUFNAHME...", micBusy: "ERKENNE...", heard: "Gehört:",
+      heardNoTicket: "keine Ticketnummer erkannt", heardNotOpen: "{t} ist kein offenes JW-Ticket", micDenied: "Mikrofon-Zugriff verweigert.",
+      micInsecure: "Mikrofon nur über HTTPS oder localhost verfügbar – diese Seite läuft über http://{h}.", micFailed: "Spracheingabe fehlgeschlagen: ",
+      chatPh: "Frag JARVIS...", send: "Senden", close: "Schließen", chatHello: "Hallo! Frag mich zu Code, Jira-Tickets oder technischen Problemen.",
+      chatFailed: "JARVIS ist gerade nicht erreichbar: ",
+      steps: ["Ticket", "Repo", "Klonen", "Plan", "Freigabe", "Code", "Tests", "Review", "PR", "Info"],
+    },
+    en: {
+      standby: "STANDING BY", standbySub: "select a ticket and activate", activate: "ACTIVATE JARVIS",
+      createTicket: "CREATE TICKET", missionLog: "MISSION LOG", fullRun: "FULL RUN", fullRunSub: "Opens a draft PR, comments on Jira",
+      dryRun: "DRY RUN", dryRunSub: "Plan only, no code change", approve: "APPROVE PLAN", reject: "REJECT",
+      complete: "MISSION COMPLETE", failed: "MISSION FAILED", selectTicket: "Select ticket...",
+      connected: "Connected", disconnected: "Disconnected – run: python -m jarvis console",
+      loadingTickets: "Loading tickets…", noTickets: "No open tickets in JW", ticketsFailed: "Could not load tickets",
+      reload: "Reload tickets", telemetry: "Live telemetry", awaiting: "Awaiting authorization", approach: "Approach",
+      files: "Files to change", testPlan: "Test plan", risk: "Risk", tokens: "tokens",
+      summaryLbl: "Ticket summary", summaryPh: "e.g. Add calculate_tax function to app.py", descLbl: "Description",
+      descPh: "What should change? Include requirements and the tests to add.", createBtn: "CREATE IN JW", creating: "Creating…",
+      created: "Created", summaryShort: "Please enter a summary (at least 3 characters).", createFailed: "Could not create ticket",
+      quickAccess: "Quick access", colTicket: "Ticket", colStatus: "Status", colDuration: "Duration", colPr: "Pull request",
+      noRuns: "No missions logged yet.", historyOffline: "History unavailable while offline.",
+      initializing: "Initializing {t}", stepOf: "step {i} of {n}", awaitingSub: "review the plan below", repair: "Repair",
+      repairSub: "fixing failing tests", aborted: "Aborted", planRejected: "plan rejected", seeDetails: "see details below",
+      dryDone: "✓ DRY RUN COMPLETE — plan approved, no code changed", finished: "✓ JARVIS FINISHED", runFailed: "✕ RUN FAILED",
+      rejectedTitle: "PLAN REJECTED", nothingChanged: "Nothing was changed.", outcome: "Outcome", error: "Error",
+      duration: "Duration", approvedBy: "Approved by", pr: "Pull request", tests: "Tests", judge: "Judge", unknownError: "unknown error",
+      testsLine: "{ok} · {p} passed, {f} failed, {e} errors · {s}s", testsOk: "✓ passed", testsBad: "✕ failed", repairs: " · {n} repair attempt(s)",
+      logStarted: "JARVIS online. Run {id} engaged for {t}", logDry: " (dry run)", logPlanReady: "plan ready – waiting for approval",
+      logApproved: "authorization granted – plan approved", logRejected: "authorization denied – plan rejected", logComplete: "mission complete",
+      logApprovalFailed: "approval failed: ", couldNotStart: "Could not start: ", ticketsPrefix: "Tickets: ",
+      confirmFull: "Full run for {t}: after you approve the plan, JARVIS pushes a branch, opens a draft PR and comments on the Jira ticket. Continue?",
+      st_done: "done", st_failed: "failed", st_cancelled: "cancelled", st_running: "running", st_awaiting_approval: "awaiting approval", dry: "DRY",
+      micTitle: "Pick a ticket by voice (5 seconds)", micRec: "RECORDING...", micBusy: "RECOGNIZING...", heard: "Heard:",
+      heardNoTicket: "no ticket number recognized", heardNotOpen: "{t} is not an open JW ticket", micDenied: "Microphone access denied.",
+      micInsecure: "The microphone only works over HTTPS or localhost – this page is served over http://{h}.", micFailed: "Voice input failed: ",
+      chatPh: "Ask JARVIS...", send: "Send", close: "Close", chatHello: "Hi! Ask me about code, Jira tickets or technical problems.",
+      chatFailed: "JARVIS is not reachable right now: ",
+      steps: ["Ticket", "Repo", "Clone", "Plan", "Approval", "Code", "Tests", "Review", "PR", "Notify"],
+    },
+  };
+  const STEP_KEYS = ["READ_TICKET", "FIND_REPO", "READ_REPO", "PLAN", "AWAIT_APPROVAL", "CODE_CHANGE", "RUN_TESTS", "REVIEW", "CREATE_PR", "NOTIFY"];
+  let lang = "de";
+  try { const saved = localStorage.getItem("jarvis.lang"); if (saved === "en" || saved === "de") lang = saved; } catch (_) { /* storage blocked */ }
+  const t = (key, params) => {
+    let s = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+    if (params) for (const k in params) s = s.replace("{" + k + "}", params[k]);
+    return s;
+  };
+
+  let currentRun = null;      // {id, ticket, dryRun, ws, poll, seen, finished, stateIdx}
+  let connected = null;
+  let mood = "idle";
+  let phaseState = { key: "standby", sub: "standbySub" };   // re-rendered on language switch
+  let lastResult = null;                                      // {ev, run}
+  let lastRuns = null;
+  let tickets = null;                                         // [] once loaded, null while loading, "error"
+
+  function applyLang() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((n) => { n.textContent = t(n.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-ph]").forEach((n) => { n.placeholder = t(n.dataset.i18nPh); });
+    document.querySelectorAll("[data-i18n-title]").forEach((n) => { n.title = t(n.dataset.i18nTitle); });
+    document.querySelectorAll("[data-i18n-aria]").forEach((n) => { n.setAttribute("aria-label", t(n.dataset.i18nAria)); });
+    $("langCode").textContent = lang.toUpperCase();
+    $("flagDe").hidden = lang !== "de"; $("flagEn").hidden = lang !== "en";
+    $("langBtn").setAttribute("aria-label", lang === "de" ? "Sprache: Deutsch – auf Englisch wechseln" : "Language: English – switch to German");
+    renderDryToggle(); renderPhase(); renderConn(); renderTicketOptions(); renderStepLabels(); renderClock();
+    if (lastResult) renderResult(); if (lastRuns) renderHistory();
+    renderMic(); renderHeard(); renderChatEmpty();
+  }
+  $("langBtn").addEventListener("click", () => {
+    lang = lang === "de" ? "en" : "de";
+    try { localStorage.setItem("jarvis.lang", lang); } catch (_) { /* storage blocked */ }
+    applyLang();
+  });
+
+  /* ---------- HUD corners ---------- */
+  document.querySelectorAll(".hud").forEach((n) => ["tl", "tr", "bl", "br"].forEach((c) => n.appendChild(el("i", "hc " + c))));
+
+  /* ---------- clock ---------- */
+  function renderClock() {
+    const now = new Date(), loc = lang === "de" ? "de-DE" : "en-GB";
+    $("clockTime").textContent = now.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    $("clockDate").textContent = now.toLocaleDateString(loc, { weekday: "short", day: "2-digit", month: "short", year: "numeric" }).toUpperCase();
+  }
+  setInterval(renderClock, 1000);
+
+  /* ---------- visuals: starfield ---------- */
+  (function stars() {
+    const c = $("stars"), ctx = c.getContext("2d"); let pts = [];
+    const resize = () => {
+      c.width = innerWidth * devicePixelRatio; c.height = innerHeight * devicePixelRatio;
+      pts = Array.from({ length: Math.round(innerWidth * innerHeight / 5000) }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.2 + .2, p: Math.random() * 6.28, s: Math.random() * .02 + .005 }));
+    };
+    const draw = () => {
+      ctx.clearRect(0, 0, c.width, c.height);
+      for (const s of pts) {
+        s.p += s.s; ctx.globalAlpha = .25 + .55 * (0.5 + 0.5 * Math.sin(s.p));
+        ctx.fillStyle = s.r > 1.1 ? "#9fe8ff" : "#ffffff";
+        ctx.beginPath(); ctx.arc(s.x * c.width, s.y * c.height, s.r * devicePixelRatio, 0, 6.283); ctx.fill();
+      }
+      if (!REDUCED) requestAnimationFrame(draw);
+    };
+    addEventListener("resize", resize); resize(); draw();
+  })();
+
+  /* ---------- visuals: Siri-style waveform ---------- */
+  const wave = (function () {
+    const c = $("wave"), ctx = c.getContext("2d");
+    const COLORS = { idle: ["0,212,255"], working: ["0,212,255", "47,123,255", "122,92,255"], waiting: ["255,176,32", "255,120,60"],
+                     done: ["0,255,157", "0,212,255"], failed: ["255,59,92", "255,120,140"] };
+    const TARGET = { idle: .06, working: 1, waiting: .35, done: .18, failed: .12 };
+    let amp = .06, tt = 0;
+    const resize = () => { c.width = c.clientWidth * devicePixelRatio; c.height = c.clientHeight * devicePixelRatio; };
+    addEventListener("resize", resize); resize();
+    function frame() {
+      const w = c.width, h = c.height, mid = h / 2;
+      amp += (TARGET[mood] - amp) * .04; tt += mood === "working" ? .09 : .03;
+      ctx.clearRect(0, 0, w, h); ctx.globalCompositeOperation = "lighter";
+      (COLORS[mood] || COLORS.idle).forEach((rgb, k) => {
+        for (let layer = 0; layer < 2; layer++) {
+          ctx.beginPath();
+          const phase = tt * (1 + k * .35) + k * 1.7 + layer * 2.4, freq = 2.2 + k * .6 + layer * .9;
+          for (let x = 0; x <= w; x += 3) {
+            const nx = x / w, env = Math.pow(Math.sin(Math.PI * nx), 2.2);
+            const y = mid + Math.sin(nx * freq * Math.PI * 2 + phase) * env * amp * (h * .42) * (layer ? .55 : 1) * (0.75 + 0.25 * Math.sin(tt * .7 + k));
+            x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          ctx.strokeStyle = "rgba(" + rgb + "," + (layer ? .35 : .85) + ")";
+          ctx.lineWidth = (layer ? 1.2 : 2.2) * devicePixelRatio;
+          ctx.shadowColor = "rgba(" + rgb + ",1)"; ctx.shadowBlur = 14 * devicePixelRatio;
+          ctx.stroke();
+        }
+      });
+      ctx.globalCompositeOperation = "source-over";
+      if (!REDUCED) requestAnimationFrame(frame);
+    }
+    frame();
+    return { redraw: frame };
+  })();
+
+  async function api(path, opts) {
+    const res = await fetch(API + path, opts);
+    let body = null;
+    try { body = await res.json(); } catch (_) { /* no body */ }
+    if (!res.ok) {
+      const d = body && body.detail;
+      throw new Error(typeof d === "string" ? d : (Array.isArray(d) ? d.map((x) => x.msg).join("; ") : "HTTP " + res.status));
+    }
+    return body;
+  }
+  const post = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  const say = (id, text, kind) => { const n = $(id); n.textContent = text; n.className = "msg" + (kind ? " " + kind : ""); };
+
+  /* ---------- connection status ---------- */
+  function renderConn() {
+    if (connected === null) { $("conn").textContent = "…"; return; }
+    $("dot").className = "dot" + (connected ? " on" : "");
+    $("dot").setAttribute("aria-label", t(connected ? "connected" : "disconnected"));
+    $("conn").textContent = connected ? t("connected") + " · " + (location.host || HOST) : t("disconnected");
+  }
+  async function ping() {
+    let ok = false;
+    try { ok = (await api("/api/health")).status === "ok"; } catch (_) { ok = false; }
+    if (ok && !connected) { loadTickets(); loadHistory(); }
+    connected = ok; renderConn();
+  }
+
+  /* ---------- create ticket ---------- */
+  $("createBtn").addEventListener("click", async () => {
+    const summary = $("summary").value.trim();
+    if (summary.length < 3) { say("createMsg", t("summaryShort"), "err"); return; }
+    $("createBtn").disabled = true; say("createMsg", t("creating"));
+    try {
+      const tk = await post("/api/tickets", { project: "JW", summary, description: $("description").value });
+      const m = $("createMsg"); m.className = "msg ok"; m.textContent = t("created") + " ";
+      const url = safeUrl(tk.url);
+      if (url) { const a = el("a", "", tk.key); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; m.appendChild(a); }
+      else m.appendChild(document.createTextNode(tk.key));
+      m.appendChild(document.createTextNode(" – " + tk.summary));
+      $("summary").value = ""; $("description").value = "";
+      await loadTickets(tk.key);
+    } catch (e) { say("createMsg", t("createFailed") + ": " + e.message, "err"); }
+    finally { $("createBtn").disabled = false; }
+  });
+
+  /* ---------- tickets + start ---------- */
+  const runActive = () => currentRun && !currentRun.finished;
+  function updateStart() { $("startBtn").disabled = runActive() || !$("ticketSelect").value; }
+  function renderTicketOptions(select) {
+    const sel = $("ticketSelect"), keep = select !== undefined ? select : sel.value;
+    sel.replaceChildren();
+    if (tickets === null) sel.appendChild(new Option(t("loadingTickets"), ""));
+    else if (tickets === "error") sel.appendChild(new Option(t("ticketsFailed"), ""));
+    else if (!tickets.length) sel.appendChild(new Option(t("noTickets"), ""));
+    else {
+      sel.appendChild(new Option(t("selectTicket"), ""));
+      for (const tk of tickets) sel.appendChild(new Option(tk.key + "  ·  " + tk.summary + "   [" + tk.status + "]", tk.key));
+      if (keep && tickets.some((tk) => tk.key === keep)) sel.value = keep;
+    }
+    updateStart();
+  }
+  async function loadTickets(select) {
+    try { tickets = await api("/api/tickets?project=JW"); say("runMsg", ""); }
+    catch (e) { tickets = "error"; say("runMsg", t("ticketsPrefix") + e.message, "err"); }
+    renderTicketOptions(select);
+  }
+  $("ticketSelect").addEventListener("change", updateStart);
+  $("reloadBtn").addEventListener("click", () => loadTickets($("ticketSelect").value));
+  function renderDryToggle() {
+    const dry = $("dryRun").checked;
+    $("dryTitle").textContent = t(dry ? "dryRun" : "fullRun");
+    $("dryLabel").textContent = t(dry ? "dryRunSub" : "fullRunSub");
+  }
+  $("dryRun").addEventListener("change", renderDryToggle);
+
+  $("startBtn").addEventListener("click", async () => {
+    const ticket = $("ticketSelect").value; if (!ticket) return;
+    const dryRun = $("dryRun").checked;
+    if (!dryRun && !confirm(t("confirmFull", { t: ticket }))) return;
+    const btn = $("startBtn");
+    btn.classList.remove("pulse"); void btn.offsetWidth; btn.classList.add("pulse");
+    btn.disabled = true; say("runMsg", "");
+    try {
+      const { run_id } = await post("/api/run", { ticket_id: ticket, dry_run: dryRun });
+      beginRun(run_id, ticket, dryRun);
+    } catch (e) { say("runMsg", t("couldNotStart") + e.message, "err"); updateStart(); }
+  });
+
+  /* ---------- live progress ---------- */
+  function buildSteps() {
+    const box = $("steps"); box.replaceChildren();
+    STEP_KEYS.forEach((_, i) => {
+      const s = el("div", "step"); s.setAttribute("role", "listitem");
+      s.append(el("div", "bar"), el("div", "stepnum", String(i + 1)), el("div", "lbl"));
+      box.appendChild(s);
+    });
+    renderStepLabels();
+  }
+  function renderStepLabels() { [...$("steps").querySelectorAll(".lbl")].forEach((n, i) => { n.textContent = t("steps")[i]; }); }
+  function setProgress(pct) {
+    pct = Math.max(0, Math.min(100, Math.round(pct)));
+    $("progFill").style.width = pct + "%"; $("progPct").textContent = pct + "%";
+  }
+  const setMood = (m) => {
+    mood = m; $("stage").className = "stage hud " + m; document.body.className = "m-" + m;
+    $("startBtn").classList.toggle("engaged", m === "working" || m === "waiting");
+    if (REDUCED) wave.redraw();
+  };
+  const burst = () => { const r = $("ripples"); r.classList.remove("burst"); void r.offsetWidth; r.classList.add("burst"); setTimeout(() => r.classList.remove("burst"), 1300); };
+  // The phase is kept as keys (not text) so a language switch re-renders it.
+  function setPhase(key, sub, params) { phaseState = { key, sub, params }; renderPhase(); }
+  function setStepPhase(i) { phaseState = { step: i }; renderPhase(); }
+  function renderPhase() {
+    const p = $("phase"), s = phaseState;
+    if (s.step !== undefined) {
+      p.textContent = t("steps")[s.step];
+      p.appendChild(el("small", "", t("stepOf", { i: s.step + 1, n: STEP_KEYS.length })));
+      return;
+    }
+    p.textContent = t(s.key, s.params);
+    if (s.sub) p.appendChild(el("small", "", typeof s.sub === "string" ? t(s.sub, s.params) : s.sub.text));
+  }
+
+  /* typewriter log: lines queue up and are typed out; a long backlog types faster */
+  const typeQueue = []; let typing = false;
+  const clock = (d) => (d || new Date()).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  function log(text, cls, ts) {
+    typeQueue.push({ text, cls: cls || "m", ts: ts || clock() });
+    if (!typing) typeNext();
+  }
+  function typeNext() {
+    const item = typeQueue.shift(); if (!item) { typing = false; return; }
+    typing = true;
+    const box = $("log"), row = el("div"), body = el("span", item.cls + " caret");
+    row.append(el("span", "t", "[" + item.ts + "] "), body); box.appendChild(row);
+    if (REDUCED) { body.textContent = item.text; body.classList.remove("caret"); box.scrollTop = box.scrollHeight; typeNext(); return; }
+    let i = 0;
+    (function tick() {
+      i = Math.min(item.text.length, i + 1 + Math.floor(typeQueue.length * 1.5) + (item.text.length > 120 ? 2 : 0));
+      body.textContent = item.text.slice(0, i); box.scrollTop = box.scrollHeight;
+      if (i < item.text.length) setTimeout(tick, 14);
+      else { body.classList.remove("caret"); setTimeout(typeNext, 40); }
+    })();
+  }
+
+  function beginRun(runId, ticket, dryRun) {
+    if (currentRun) closeRun();
+    currentRun = { id: runId, ticket, dryRun, ws: null, poll: null, seen: 0, finished: false, stateIdx: -1 };
+    $("live").classList.add("show");
+    typeQueue.length = 0; $("log").replaceChildren();
+    $("approval").classList.remove("show"); $("result").className = "panel hud"; $("result").querySelectorAll(":scope > :not(.hc)").forEach((n) => n.remove());
+    lastResult = null;
+    buildSteps(); setProgress(0); setMood("working"); burst();
+    setPhase("initializing", dryRun ? "dryRun" : "fullRun", { t: ticket });
+    log(t("logStarted", { id: runId.slice(0, 8), t: ticket }) + (dryRun ? t("logDry") : ""), "s");
+    updateStart(); openSocket();
+  }
+
+  function openSocket() {
+    const run = currentRun; if (!run) return;
+    let ws;
+    try { ws = new WebSocket(WS + "/ws/" + run.id); } catch (_) { startPolling(); return; }
+    run.ws = ws;
+    ws.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch (_) { /* ignore malformed */ } };
+    ws.onerror = () => { if (!run.finished) startPolling(); };
+    ws.onclose = () => { if (!run.finished) startPolling(); };
+  }
+
+  function startPolling() {           // fallback when the WebSocket drops: replay events via REST
+    const run = currentRun; if (!run || run.poll) return;
+    run.poll = setInterval(async () => {
+      try {
+        const s = await api("/api/run/" + run.id + "/status");
+        (s.events || []).slice(run.seen).forEach(handle);
+      } catch (_) { /* server temporarily unreachable */ }
+    }, 1500);
+  }
+
+  function closeRun() {
+    if (!currentRun) return;
+    if (currentRun.ws) { currentRun.ws.onclose = currentRun.ws.onerror = null; try { currentRun.ws.close(); } catch (_) {} }
+    if (currentRun.poll) clearInterval(currentRun.poll);
+  }
+
+  function markSteps(idx, failed) {
+    [...$("steps").children].forEach((n, i) => { n.className = "step" + (i < idx ? " done" : i === idx ? (failed ? " failed" : " current") : ""); });
+  }
+
+  function handle(ev) {
+    const run = currentRun; if (!run) return;
+    run.seen += 1;
+    const ts = ev.ts ? clock(new Date(ev.ts)) : undefined;
+    if (ev.type === "state") {
+      const i = STEP_KEYS.indexOf(ev.state);
+      if (i >= 0) {
+        run.stateIdx = i; markSteps(i, false); setProgress(((i + 1) / STEP_KEYS.length) * 100); setStepPhase(i);
+      } else if (ev.state === "REPAIR") { setPhase("repair", "repairSub"); log(">>> REPAIR", "s", ts); return; }
+      if (ev.state === "AWAIT_APPROVAL") setMood("waiting"); else if (["DONE", "CANCELLED", "FAILED"].indexOf(ev.state) < 0) setMood("working");
+      log(">>> " + ev.state, "s", ts);
+    } else if (ev.type === "note") {
+      log(ev.message, "m", ts);
+    } else if (ev.type === "approval_required") {
+      showPlan(ev.plan); setMood("waiting"); setPhase("awaiting", "awaitingSub"); log(t("logPlanReady"), "s", ts);
+    } else if (ev.type === "finished") {
+      finish(ev, ts);
+    }
+  }
+  function showPlan(p) {
+    $("planApproach").textContent = p.approach;
+    const files = $("planFiles"); files.replaceChildren();
+    for (const f of p.files) { const li = el("li"); li.append(el("strong", "", f.path), document.createTextNode(" – " + f.reason)); files.appendChild(li); }
+    const tests = $("planTests"); tests.replaceChildren();
+    for (const x of p.test_plan) tests.appendChild(el("li", "", x));
+    const risk = $("planRisk"); risk.textContent = p.risk_class; risk.className = "risk " + (["low", "medium", "high"].includes(p.risk_class) ? p.risk_class : "");
+    $("planTokens").textContent = "≈ " + p.estimated_tokens + " " + t("tokens");
+    $("approveBtn").disabled = $("rejectBtn").disabled = false;
+    $("approval").classList.add("show");
+    $("approval").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function decide(approved) {
+    if (!currentRun) return;
+    $("approveBtn").disabled = $("rejectBtn").disabled = true;
+    try {
+      await post("/api/run/" + currentRun.id + "/approval", { approved });
+      $("approval").classList.remove("show");
+      log(t(approved ? "logApproved" : "logRejected"), approved ? "g" : "e");
+      setMood("working"); if (approved) burst();
+    } catch (e) { log(t("logApprovalFailed") + e.message, "e"); $("approveBtn").disabled = $("rejectBtn").disabled = false; }
+  }
+  $("approveBtn").addEventListener("click", () => decide(true));
+  $("rejectBtn").addEventListener("click", () => decide(false));
+
+  function finish(ev, ts) {
+    const run = currentRun; run.finished = true; closeRun();
+    const r = ev.result || {};
+    $("approval").classList.remove("show");
+    const nodes = [...$("steps").children];
+    if (ev.status === "failed") {
+      setMood("failed"); setPhase("failed", r.error ? "seeDetails" : null);
+      if (run.stateIdx >= 0) markSteps(run.stateIdx, true);
+      log("FAILED: " + (r.error || t("unknownError")), "e", ts);
+    } else if (ev.status === "cancelled") {
+      setMood("failed"); setPhase("aborted", "planRejected");
+      nodes.forEach((n, i) => { n.className = "step" + (i < run.stateIdx + 1 ? " done" : " skipped"); });
+      log("CANCELLED – " + t("planRejected"), "e", ts);
+    } else {
+      setMood("done"); burst(); setProgress(100);
+      setPhase("complete", r.duration_seconds != null ? { text: r.duration_seconds + "s" } : null);
+      nodes.forEach((n, i) => { n.className = "step " + (i <= run.stateIdx ? "allgreen" : "skipped"); });
+      log(t("logComplete"), "g", ts);
+    }
+    lastResult = { ev, run }; renderResult();
+    updateStart();
+    setTimeout(() => $("result").scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+    loadHistory();
+  }
+
+  function renderResult() {
+    const { ev, run } = lastResult, r = ev.result || {}, box = $("result");
+    box.querySelectorAll(":scope > :not(.hc)").forEach((n) => n.remove());
+    const dl = el("dl");
+    const add = (k, v, wide) => { const d = el("div", wide ? "wide" : ""); d.append(el("dt", "", k)); const dd = el("dd"); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; d.appendChild(dd); dl.appendChild(d); };
+    if (ev.status === "failed") {
+      box.className = "panel hud show bad"; box.appendChild(el("h3", "", t("runFailed")));
+      add(t("error"), r.error || t("unknownError"), true);
+    } else if (ev.status === "cancelled") {
+      box.className = "panel hud show bad"; box.appendChild(el("h3", "", t("rejectedTitle")));
+      add(t("outcome"), t("nothingChanged"), true);
+    } else {
+      box.className = "panel hud show ok"; box.appendChild(el("h3", "", run.dryRun ? t("dryDone") : t("finished")));
+      add(t("colTicket"), run.ticket);
+      add(t("duration"), r.duration_seconds != null ? r.duration_seconds + "s" : "–");
+      if (r.approver) add(t("approvedBy"), r.approver);
+      const pr = safeUrl(r.pr_url);
+      if (pr) { const a = el("a", "", r.pr_url); a.href = pr; a.target = "_blank"; a.rel = "noopener noreferrer"; add(t("pr"), a, true); }
+      if (r.tests) add(t("tests"), t("testsLine", { ok: t(r.tests.passed ? "testsOk" : "testsBad"), p: r.tests.passed_count, f: r.tests.failed, e: r.tests.errors, s: r.tests.duration_seconds })
+        + (r.repair_attempts ? t("repairs", { n: r.repair_attempts }) : ""), true);
+      if (r.judge) add(t("judge"), (r.judge.passed ? "✓ " : "⚠ ") + r.judge.findings, true);
+    }
+    box.appendChild(dl);
+  }
+
+  /* ---------- history ---------- */
+  async function loadHistory() {
+    try { lastRuns = await api("/api/runs?limit=5"); }
+    catch (_) { lastRuns = "offline"; }
+    renderHistory();
+  }
+  function renderHistory() {
+    const box = $("history"); box.replaceChildren();
+    if (lastRuns === "offline") { box.appendChild(el("div", "empty", t("historyOffline"))); return; }
+    if (!lastRuns.length) { box.appendChild(el("div", "empty", t("noRuns"))); return; }
+    const table = el("table"), thead = el("thead"), head = el("tr"), tbody = el("tbody");
+    ["colTicket", "colStatus", "colDuration", "colPr"].forEach((h) => head.appendChild(el("th", "", t(h))));
+    thead.appendChild(head); table.appendChild(thead);
+    for (const r of lastRuns) {
+      const tr = el("tr");
+      const tk = el("td", "mono", r.ticket_id); if (r.dry_run) tk.appendChild(el("span", "dry", t("dry"))); tr.appendChild(tk);
+      const st = el("td"); st.appendChild(el("span", "pill " + r.status, t("st_" + r.status))); tr.appendChild(st);
+      tr.appendChild(el("td", "mono", r.duration_seconds != null ? r.duration_seconds + "s" : "–"));
+      const pr = el("td"), u = safeUrl(r.pr_url);
+      if (u) { const a = el("a", "", "PR ↗"); a.href = u; a.target = "_blank"; a.rel = "noopener noreferrer"; pr.appendChild(a); } else pr.textContent = "–";
+      tr.appendChild(pr); tbody.appendChild(tr);
+    }
+    table.appendChild(tbody); box.appendChild(table);
+  }
+
+  /* ---------- voice input: record 5s in the browser, the server transcribes via Whisper ---------- */
+  const MIC_SECONDS = 5;
+  let micState = "idle";          // idle | recording | busy
+  let heardState = null;          // {transcript, ticket} or {error: key, params, extra}
+  function renderMic() {
+    const b = $("micBtn");
+    b.classList.toggle("recording", micState === "recording"); b.classList.toggle("busy", micState === "busy");
+    b.disabled = micState !== "idle";
+    $("micLabel").textContent = micState === "recording" ? t("micRec") : micState === "busy" ? t("micBusy") : "";
+  }
+  function renderHeard() {
+    const n = $("heard"), h = heardState; n.replaceChildren(); n.className = "heard";
+    if (!h) return;
+    if (h.error) { n.classList.add("err"); n.textContent = t(h.error, h.params) + (h.extra || ""); return; }
+    n.append(document.createTextNode(t("heard") + " "), el("b", "", h.ticket || "–"), document.createTextNode("  ·  „" + h.transcript + "“"));
+    if (!h.ticket) n.append(document.createTextNode("  —  " + t("heardNoTicket")));
+    else if (!h.open) n.append(document.createTextNode("  —  " + t("heardNotOpen", { t: h.ticket })));
+  }
+  const setMic = (state) => { micState = state; renderMic(); };
+  $("micBtn").addEventListener("click", async () => {
+    if (micState !== "idle") return;
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      heardState = { error: "micInsecure", params: { h: location.host || HOST } }; renderHeard(); return;
+    }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (_) { heardState = { error: "micDenied" }; renderHeard(); return; }
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined), chunks = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach((tr) => tr.stop());
+      setMic("busy");
+      const blob = new Blob(chunks, { type: rec.mimeType || mime || "audio/webm" });
+      try {
+        const r = await api("/api/voice-input", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
+        const open = Array.isArray(tickets) && tickets.some((tk) => tk.key === r.ticket_id);
+        heardState = { transcript: r.transcript || "", ticket: r.ticket_id, open };
+        if (open) { $("ticketSelect").value = r.ticket_id; updateStart(); }
+      } catch (e) { heardState = { error: "micFailed", extra: e.message }; }
+      renderHeard(); setMic("idle");
+    };
+    heardState = null; renderHeard();
+    rec.start(); setMic("recording");
+    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, MIC_SECONDS * 1000);
+  });
+
+  /* ---------- chat with JARVIS (history lives only in this page session) ---------- */
+  const chatHistory = [];
+  const BOT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="4"/><circle cx="9.5" cy="13" r="1.5" fill="currentColor"/><circle cx="14.5" cy="13" r="1.5" fill="currentColor"/><path d="M12 3v4"/></svg>';
+  // Minimal Markdown for chat answers. Everything is HTML-escaped first, so model output can never inject markup.
+  function mdToHtml(src) {
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const inline = (s) => esc(s)
+      .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+      .replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>")
+      .replace(/^\s*[*-]\s+/gm, "• ");
+    return src.split(/```[\w-]*\n?/).map((part, i) => i % 2 ? "<pre><code>" + esc(part.replace(/\n$/, "")) + "</code></pre>" : inline(part)).join("");
+  }
+  function renderChatEmpty() {
+    const log = $("chatLog"), empty = log.querySelector(".chat-empty");
+    if (log.querySelector(".bubble")) { if (empty) empty.remove(); return; }
+    if (empty) empty.textContent = t("chatHello"); else log.appendChild(el("div", "chat-empty", t("chatHello")));
+  }
+  function addBubble(role, text, extraCls) {
+    const log = $("chatLog"); let node;
+    if (role === "user") node = el("div", "bubble user", text);
+    else {
+      node = el("div", "bot-row"); node.insertAdjacentHTML("afterbegin", BOT_ICON);
+      const b = el("div", "bubble bot" + (extraCls ? " " + extraCls : "")); if (text !== null) b.textContent = text; node.appendChild(b);
+    }
+    log.appendChild(node); renderChatEmpty(); log.scrollTop = log.scrollHeight;
+    return node;
+  }
+  function setChatOpen(open) {
+    $("chat").hidden = !open; $("chatToggle").setAttribute("aria-expanded", String(open));
+    if (open) { renderChatEmpty(); $("chatInput").focus(); } else $("chatToggle").focus();
+  }
+  $("chatToggle").addEventListener("click", () => setChatOpen(true));
+  $("chatClose").addEventListener("click", () => setChatOpen(false));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("chat").hidden) setChatOpen(false); });
+  $("chatForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const message = $("chatInput").value.trim(); if (!message) return;
+    $("chatInput").value = ""; $("chatSend").disabled = true;
+    addBubble("user", message);
+    const pending = addBubble("bot", null), bubble = pending.querySelector(".bubble");
+    bubble.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    try {
+      const r = await post("/api/chat", { message, history: chatHistory.slice(-20), lang });
+      bubble.innerHTML = mdToHtml(r.response || "…");
+      chatHistory.push({ role: "user", content: message }, { role: "assistant", content: r.response || "" });
+    } catch (err) { bubble.classList.add("err"); bubble.textContent = t("chatFailed") + err.message; }
+    $("chatSend").disabled = false; $("chatInput").focus(); $("chatLog").scrollTop = $("chatLog").scrollHeight;
+  });
+
+  buildSteps();
+  renderMic();
+  applyLang();
+  ping(); setInterval(ping, 4000);
+})();
+</script>
+</body>
+</html>
