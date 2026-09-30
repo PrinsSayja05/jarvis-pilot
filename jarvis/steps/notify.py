@@ -47,9 +47,29 @@ EXPECTED_RUN_DURATION = "~60s"
 _RISK_DE = {"low": "niedrig", "medium": "mittel", "high": "hoch"}
 
 
-def _for_line(assignee_name: str) -> str:
+def _esc(text: str) -> str:
+    """Telegram HTML mode: only these three characters need escaping. Markdown is not usable here,
+    because a file name like tests/test_app.py would turn into italics on the underscore."""
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _style(html: bool):
+    """(escape, bold) for the target. The same message goes to Telegram as HTML and to a Jira
+    comment as plain text, where a <b> tag would simply be shown as characters."""
+    if html:
+        return _esc, (lambda t: f"<b>{t}</b>")
+    return (lambda t: t or ""), (lambda t: t)
+
+
+def _for_line(assignee_name: str, *, html: bool = False) -> str:
     """Second line of every message: who the ticket belongs to. Never blank, never fails."""
-    return f"👤 Für: {(assignee_name or '').strip() or NOT_ASSIGNED}"
+    e, _ = _style(html)
+    return f"Für: {e((assignee_name or '').strip() or NOT_ASSIGNED)}"
+
+
+# run_id -> (chat_id, message_id, text) of the plan message. Keeping the text means the message can
+# be rewritten with the decision underneath it without asking Telegram what it used to say.
+PLAN_MESSAGES: dict[str, tuple[str, int, str]] = {}
 
 
 def _short_approach(text: str) -> str:
@@ -111,31 +131,34 @@ class DoneItem:
         return f"{self.key} ({', '.join(extras)})"
 
 
-def build_result_message(item: DoneItem) -> str:
+def build_result_message(item: DoneItem, *, html: bool = False) -> str:
     """One finished run. The first two lines carry the whole story in a notification preview."""
+    e, b = _style(html)
     tests = f"{item.passed_count}/{item.total_tests} bestanden" if item.total_tests else f"{item.passed_count} bestanden"
     if item.repairs:
         tests += f" (nach {item.repairs} Reparatur" + ("en)" if item.repairs > 1 else ")")
     return "\n".join([
-        f"✅ JARVIS fertig — {item.key}",
-        _for_line(item.assignee_name),
-        f"🔗 PR: {item.pr_url}",
-        f"✅ Tests: {tests}",
-        f"🔍 Review: {item.judge_summary or 'keine Einwände'}",
-        f"⏱️ Dauer: {item.duration_seconds:.0f}s",
+        f"✅ {b('J.A.R.V.I.S. fertig')} — {e(item.key)}",
+        _for_line(item.assignee_name, html=html),
+        "",
+        f"Tests: {e(tests)}   🔍 {e(item.judge_summary or 'keine Einwände')}",
+        f"🔗 {e(item.pr_url)}",
+        f"⏱️ {item.duration_seconds:.0f}s",
     ])
 
 
-def build_batch_message(items: list[DoneItem]) -> str:
+def build_batch_message(items: list[DoneItem], *, html: bool = False) -> str:
     """One run gets the full result message; several runs of one person get a combined one."""
     if len(items) == 1:
-        return build_result_message(items[0])
-    lines = [f"✅ JARVIS fertig — {len(items)} Tickets", _for_line(items[0].assignee_name), ""]
+        return build_result_message(items[0], html=html)
+    e, b = _style(html)
+    lines = [f"✅ {b('J.A.R.V.I.S. fertig')} — {len(items)} Tickets",
+             _for_line(items[0].assignee_name, html=html), ""]
     for i in items:
         extras = (f" ({i.repairs} Reparatur" + ("en)" if i.repairs > 1 else ")")) if i.repairs else ""
         warn = "  ⚠️ Judge-Warnung" if i.judge_warning else ""
-        lines.append(f"🔗 {i.key} · PR {i.pr_number}{extras}{warn}")
-        lines.append(f"    {i.pr_url}")
+        lines.append(f"{e(i.key)} · PR {i.pr_number}{e(extras)}{warn}")
+        lines.append(f"🔗 {e(i.pr_url)}")
     return "\n".join(lines)
 
 
@@ -145,7 +168,7 @@ Channel = Callable[[list[DoneItem], JarvisConfig], None]
 
 
 def _telegram_channel(items: list[DoneItem], config: JarvisConfig) -> None:
-    _send(build_batch_message(items), config.telegram.bot_token, config.telegram.engineer_chat_id)
+    _send(build_batch_message(items, html=True), config.telegram.bot_token, config.telegram.engineer_chat_id)
 
 
 def _jira_channel(items: list[DoneItem], config: JarvisConfig) -> None:
@@ -255,62 +278,89 @@ def notify(
 
 # ---- immediate messages -----------------------------------------------------------------------
 
-def build_plan_message(ticket: JiraTicket, plan: Plan) -> str:
+def build_plan_message(ticket: JiraTicket, plan: Plan, *, html: bool = False) -> str:
     """The plan as shown to the developer before approval (Telegram and the Jira comment)."""
     paths = [fc.path for fc in plan.files_to_change]
     shown = ", ".join(paths[:_MAX_FILES_SHOWN]) or "keine"
     if len(paths) > _MAX_FILES_SHOWN:
         shown += f" (+{len(paths) - _MAX_FILES_SHOWN} weitere)"
+    e, b = _style(html)
     return "\n".join([
-        f"🧭 JARVIS Plan — {ticket.key}",
-        _for_line(ticket.assignee_name),
-        f"📋 {ticket.summary}",
+        f"🤖 {b('J.A.R.V.I.S.')} — Ticket {e(ticket.key)}",
+        _for_line(ticket.assignee_name, html=html),
         "",
-        f"Ansatz: {_short_approach(plan.approach)}",
+        e(ticket.summary),
         "",
-        f"📁 Dateien: {shown}",
-        f"⚠️ Risiko: {_RISK_DE.get(plan.risk_class, plan.risk_class)} ({plan.risk_class})",
-        f"⏱️ Geschätzte Dauer: {EXPECTED_RUN_DURATION}",
+        f"Ansatz: {e(_short_approach(plan.approach))}",
         "",
-        f"👉 Freigabe in der Konsole: {CONSOLE_URL}",
+        f"📁 {e(shown)}   ⚠️ Risiko: {e(plan.risk_class)}   ⏱️ {EXPECTED_RUN_DURATION}",
     ])
 
 
-def notify_plan(ticket: JiraTicket, plan: Plan, config: JarvisConfig) -> None:
-    _send(build_plan_message(ticket, plan), config.telegram.bot_token, config.telegram.engineer_chat_id)
+APPROVE_DATA = "jv:approve:"
+REJECT_DATA = "jv:reject:"
 
 
-def build_failure_message(ticket_id: str, error: str, assignee_name: str = "", ticket_url: str = "") -> str:
+def plan_keyboard(run_id: str) -> dict:
+    return {"inline_keyboard": [[
+        {"text": "✅ Freigeben", "callback_data": APPROVE_DATA + run_id},
+        {"text": "❌ Ablehnen", "callback_data": REJECT_DATA + run_id},
+    ]]}
+
+
+def notify_plan(ticket: JiraTicket, plan: Plan, config: JarvisConfig, run_id: str = "") -> None:
+    """With a run_id the message carries Freigeben and Ablehnen buttons, and a press acts on that
+    console run. A run started in the terminal has no id here and therefore gets no buttons."""
+    text = build_plan_message(ticket, plan, html=True)
+    message_id = _send(text, config.telegram.bot_token, config.telegram.engineer_chat_id,
+                       reply_markup=plan_keyboard(run_id) if run_id else None)
+    if run_id and message_id:
+        PLAN_MESSAGES[run_id] = (config.telegram.engineer_chat_id, message_id, text)
+
+
+def build_failure_message(ticket_id: str, error: str, assignee_name: str = "", ticket_url: str = "",
+                          *, html: bool = False) -> str:
     error = " ".join((error or "").split())
     if len(error) > _MAX_ERROR_CHARS:
         error = error[:_MAX_ERROR_CHARS] + "…"
+    e, b = _style(html)
     return "\n".join([
-        f"❌ JARVIS fehlgeschlagen — {ticket_id}",
-        _for_line(assignee_name),
-        f"Grund: {error}",
-        f"👉 Manueller Eingriff nötig: {ticket_url or CONSOLE_URL}",
+        f"❌ {b('J.A.R.V.I.S. — manueller Eingriff nötig')} — {e(ticket_id)}",
+        _for_line(assignee_name, html=html),
+        "",
+        f"Grund: {e(error)}",
+        f"🔗 {e(ticket_url or CONSOLE_URL)}",
     ])
 
 
 def notify_failure(ticket_id: str, error: str, config: JarvisConfig, *,
                    assignee_name: str = "", ticket_url: str = "") -> None:
     """Tell the developer a run ended in FAILED, with the reason. Never batched."""
-    _send(build_failure_message(ticket_id, error, assignee_name, ticket_url),
+    _send(build_failure_message(ticket_id, error, assignee_name, ticket_url, html=True),
           config.telegram.bot_token, config.telegram.engineer_chat_id)
 
 
-def _send(text: str, bot_token: str, chat_id: str) -> None:
-    """Best effort: a failed notification must never change the outcome of the run."""
+def _send(text: str, bot_token: str, chat_id: str, *, reply_markup: dict | None = None) -> int | None:
+    """Best effort: a failed notification must never change the outcome of the run.
+
+    Returns the Telegram message id, which is what later lets a plan message be edited.
+    """
     if bot_token in ("", "disabled"):
         logger.warning("telegram notification skipped: TELEGRAM_BOT_TOKEN is not configured")
-        return
+        return None
+    body: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                  "disable_web_page_preview": True}
+    if reply_markup:
+        body["reply_markup"] = reply_markup
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         with httpx.Client(timeout=15) as client:
-            response = client.post(url, json={"chat_id": chat_id, "text": text})
+            response = client.post(url, json=body)
         response.raise_for_status()
+        return response.json().get("result", {}).get("message_id")
     except httpx.HTTPStatusError as exc:
         # Log only the status: the exception text contains the URL, and the URL contains the bot token.
         logger.warning("telegram notification failed: HTTP %s", exc.response.status_code)
     except httpx.HTTPError as exc:
         logger.warning("telegram notification failed: %s", type(exc).__name__)
+    return None

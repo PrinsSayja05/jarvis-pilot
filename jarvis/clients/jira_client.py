@@ -15,6 +15,7 @@ logger = logging.getLogger("jarvis.jira")
 _ACCEPTANCE_FIELD_NAMES = ("acceptance criteria", "akzeptanzkriterien")
 # Comments JARVIS wrote itself are not context for the planner (current formats and the ones before 30.09.2026).
 JARVIS_COMMENT_PREFIXES = (
+    "J.A.R.V.I.S.",  # the format used since 30.09.2026, in every icon variant
     "🧭 JARVIS", "🔗 JARVIS", "❌ JARVIS", "✅ JARVIS",
     "🤖 JARVIS Plan Ready", "JARVIS hat einen Draft PR", "JARVIS could not complete",
 )

@@ -120,6 +120,7 @@ class RunRecord:
     started_at: str
     status: str = "running"  # queued | running | awaiting_approval | done | cancelled | failed
     person: str = "unassigned"  # ticket assignee: the run queue key
+    assignee_name: str = ""     # shown when someone else presses the Telegram button
     actor: str = ""             # who started it (demo-selected name, not verified)
     state: str = "INIT"
     events: list[dict] = field(default_factory=list)
@@ -195,6 +196,20 @@ _load_history()
 def _log_auth_mode() -> None:
     mode, reason = auth_mode()
     logger.info("startup: console auth mode = %s (%s)", mode, reason)
+
+
+@app.on_event("startup")
+def _start_telegram_bot() -> None:
+    """Approvals from Telegram. Polling, because SOKRATES-1 is not reachable from the internet."""
+    try:
+        from jarvis.console import telegram_bot
+
+        started = telegram_bot.start(_get_config(), lambda rid: _runs.get(rid), apply_decision)
+        if started:
+            logger.info("startup: telegram approvals active (%d user(s) mapped in %s)",
+                        len(telegram_bot.load_user_map()), telegram_bot.USER_MAP_FILE)
+    except Exception as exc:
+        logger.warning("startup: telegram approvals not started (%s)", exc)
 
 
 @app.on_event("startup")
@@ -317,15 +332,16 @@ def _run_and_release(record: RunRecord, config: JarvisConfig) -> None:
         _queue.finished(record.person, record.run_id)
 
 
-def _person_of(ticket_id: str) -> str:
-    """The ticket's assignee (queue key). Unknown -> "unassigned", which queues conservatively."""
+def _person_of(ticket_id: str) -> tuple[str, str]:
+    """(accountId, display name) of the ticket's assignee. The id is the run queue key and decides
+    who may press the Telegram button; unknown -> "unassigned", which queues conservatively."""
     try:
-        account = JiraClient(_get_config().jira).assignees_of([ticket_id]).get(ticket_id, "")
-        _assignee_cache[ticket_id] = (time.monotonic(), account)
-        return account or "unassigned"
+        ticket = JiraClient(_get_config().jira).get_ticket(ticket_id)
+        _assignee_cache[ticket_id] = (time.monotonic(), ticket.assignee_id)
+        return ticket.assignee_id or "unassigned", ticket.assignee_name
     except Exception as exc:
         logger.warning("assignee lookup for the run queue failed: %s", type(exc).__name__)
-        return "unassigned"
+        return "unassigned", ""
 
 
 def _actor(request: Request, claimed: str) -> tuple[str, str]:
@@ -542,9 +558,9 @@ def start_run(body: RunRequest, request: Request) -> dict:
         dry_run=body.dry_run,
         started_at=datetime.now(timezone.utc).isoformat(),
         status="queued",
-        person=_person_of(body.ticket_id),
         actor=actor,
     )
+    record.person, record.assignee_name = _person_of(body.ticket_id)
     with _runs_lock:
         _runs[record.run_id] = record
 
@@ -589,25 +605,34 @@ def run_status(run_id: str) -> dict:
     raise HTTPException(status_code=404, detail="unknown run")
 
 
-@app.post("/api/run/{run_id}/approval")
-def decide(run_id: str, body: ApprovalRequest, request: Request) -> dict:
-    record = _get_run(run_id)
+def apply_decision(record: RunRecord, *, approved: bool, reason: str, actor: str,
+                   actor_source: str, ip: str = "") -> None:
+    """Release a waiting run and write the audit trail. Shared by the console and Telegram, so a
+    tap in Telegram takes exactly the same path as the APPROVE button in the browser."""
     with record._lock:
         if record.status != "awaiting_approval":
             raise HTTPException(status_code=409, detail="run is not waiting for approval")
-        record._approved = body.approved
+        record._approved = approved
         plan = record.plan or {}
     record._approval.set()
     # Audit after the decision took effect: logging must never delay or block the run.
-    actor, source = _actor(request, body.actor)
-    reason = body.reason if not body.approved else ""
-    audit.record_approval(run_id=run_id, ticket_id=record.ticket_id, decision="approved" if body.approved else "rejected",
-                          actor=actor, actor_source=source, risk_class=plan.get("risk_class", ""),
-                          dry_run=record.dry_run, reason=reason, ip=_client_ip(request))
-    if not body.approved:
-        audit.record_feedback("plan_rejected", ticket_id=record.ticket_id, run_id=run_id, plan=plan,
+    reason = reason if not approved else ""
+    audit.record_approval(run_id=record.run_id, ticket_id=record.ticket_id,
+                          decision="approved" if approved else "rejected",
+                          actor=actor, actor_source=actor_source, risk_class=plan.get("risk_class", ""),
+                          dry_run=record.dry_run, reason=reason, ip=ip)
+    if not approved:
+        audit.record_feedback("plan_rejected", ticket_id=record.ticket_id, run_id=record.run_id, plan=plan,
                               reason=reason or "(kein Grund angegeben)", minio_settings=_get_config().minio,
-                              extra={"actor": actor, "actor_source": source, "dry_run": record.dry_run})
+                              extra={"actor": actor, "actor_source": actor_source, "dry_run": record.dry_run})
+
+
+@app.post("/api/run/{run_id}/approval")
+def decide(run_id: str, body: ApprovalRequest, request: Request) -> dict:
+    record = _get_run(run_id)
+    actor, source = _actor(request, body.actor)
+    apply_decision(record, approved=body.approved, reason=body.reason, actor=actor,
+                   actor_source=source, ip=_client_ip(request))
     return {"approved": body.approved}
 
 

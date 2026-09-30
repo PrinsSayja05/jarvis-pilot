@@ -179,7 +179,7 @@ def _pr_label(url: str) -> str:
 def _announce_plan(ticket, plan, run_id, config, tracker, *, post_to_jira: bool) -> None:
     """Show the plan outside the terminal before approval. Best effort: never blocks the run."""
     try:
-        notify_plan(ticket, plan, config)
+        notify_plan(ticket, plan, config, run_id)
     except Exception:
         logger.exception("could not send the plan notification")
     if post_to_jira:  # dry runs never write to Jira
