@@ -35,6 +35,10 @@
   .badge { font: 700 10px/1 var(--display); letter-spacing: 2px; text-transform: uppercase; padding: 7px 12px;
     border-radius: 999px; color: var(--amber); border: 1px solid rgba(255,176,32,.5); background: rgba(255,176,32,.08); }
   .stamp { font: 500 13px var(--ui); color: var(--muted); letter-spacing: .5px; }
+  .back { font: 700 10px/1 var(--display); letter-spacing: 1.6px; text-transform: uppercase; color: var(--muted);
+    padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap;
+    border-bottom: 1px solid var(--line); background: rgba(0,212,255,.04); }
+  .back:hover { color: var(--cyan); border-color: var(--line-2); text-shadow: 0 0 8px var(--cyan); }
 
   .panel { position: relative; background: var(--glass); border: 1px solid var(--line); border-radius: 10px;
     padding: 18px 20px; backdrop-filter: blur(7px); margin-bottom: 18px; }
@@ -92,6 +96,7 @@
   <header>
     <div class="brand">J.A.R.V.I.S<small>CEO-Ansicht</small></div>
     <div class="spacer"></div>
+    <a class="back" href="/" title="Zur Entwicklerkonsole">← Zurück zur Konsole</a>
     <div class="badge">Nur Ansicht</div>
     <div class="stamp" id="stamp" aria-live="polite">…</div>
   </header>

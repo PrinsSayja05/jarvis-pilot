@@ -638,14 +638,23 @@ def _jira_account(email: str) -> tuple[str, str] | None:
 
 
 def _demo_people(project: str = "JW") -> list[dict]:
-    """The people the demo switcher offers: everyone who has open tickets in the project."""
+    """The people the demo switcher offers: everyone with open tickets in the project, plus the
+    admins from .jarvis/admins.json. An admin without tickets belongs in the list too, otherwise
+    there is no way to select them and the CEO view link could never appear for them."""
     hit = _people_cache.get(project)
     if hit and time.monotonic() - hit[0] < 300:
         return hit[1]
+    client = JiraClient(_get_config().jira)
     people: dict[str, str] = {}
-    for t in JiraClient(_get_config().jira).search_open(project, limit=100):
+    for t in client.search_open(project, limit=100):
         if t.assignee_id:
             people[t.assignee_id] = t.assignee_name
+    for account in _admin_accounts():
+        if account not in people:
+            try:
+                people[account] = client.display_name(account) or account
+            except Exception as exc:
+                logger.info("name lookup for admin account failed: %s", type(exc).__name__)
     result = sorted(({"account_id": a, "name": n} for a, n in people.items()), key=lambda p: p["name"].lower())
     _people_cache[project] = (time.monotonic(), result)
     return result

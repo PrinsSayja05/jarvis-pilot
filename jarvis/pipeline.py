@@ -288,7 +288,7 @@ def _code_test_review_pr(
 
     machine.transition(RunState.REVIEW)
     try:
-        review_result = review(ticket, plan, change, test_result, config)
+        review_result = review(ticket, plan, change, test_result, config, on_note=tracker.note)
     except Exception as exc:  # tests passed, so a broken judge must not block the PR
         logger.warning("Judge review failed, continuing without it: %s", exc)
         tracker.note(f"Judge review failed, PR will carry a warning: {exc}")

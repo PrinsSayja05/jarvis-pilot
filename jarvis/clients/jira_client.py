@@ -112,6 +112,15 @@ class JiraClient:
             for issue in response.json().get("issues", [])
         ]
 
+    def display_name(self, account_id: str) -> str:
+        """Name of a Jira account. Needed for people the console knows by id only, such as an
+        admin who has no open tickets and therefore appears in no ticket list."""
+        with httpx.Client(auth=self._auth, timeout=15) as client:
+            response = client.get(f"{self._base_url}/rest/api/3/user", params={"accountId": account_id})
+        if response.status_code != 200:
+            return ""
+        return response.json().get("displayName", "")
+
     def find_account_by_email(self, email: str) -> tuple[str, str] | None:
         """(accountId, displayName) of the Jira user with this e-mail. Jira finds users by e-mail even when
         their profile hides the address, so this is the reliable link from a Keycloak login to Jira."""
