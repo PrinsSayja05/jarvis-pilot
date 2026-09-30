@@ -162,6 +162,13 @@ _load_history()
 
 
 @app.on_event("startup")
+def _cleanup_stale_clones() -> None:
+    from jarvis.steps.read_repo import cleanup_stale_clones
+
+    logger.info("startup: removed %d stale clone dir(s)", cleanup_stale_clones())
+
+
+@app.on_event("startup")
 def _log_github_auth() -> None:
     try:
         from jarvis.clients.github_client import log_auth_mode
@@ -318,13 +325,48 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+_PR_CACHE_SECONDS = 60
+_open_pr_cache: dict[str, tuple[float, dict[str, str]]] = {}   # repo -> (fetched at, {branch: PR url})
+
+
+def _open_prs(repo: str) -> dict[str, str]:
+    """Open PRs of one repo as {head branch: url}. Cached briefly; GitHub trouble just means no badge."""
+    hit = _open_pr_cache.get(repo)
+    if hit and time.monotonic() - hit[0] < _PR_CACHE_SECONDS:
+        return hit[1]
+    from jarvis.clients.github_client import GitHubClient
+
+    prs: dict[str, str] = {}
+    try:
+        for pr in GitHubClient(_get_config().github).get_repo(repo).get_pulls(state="open"):
+            prs[pr.head.ref] = pr.html_url
+    except Exception as exc:
+        logger.info("open PR lookup for %s failed: %s", repo, type(exc).__name__)
+        return hit[1] if hit else {}
+    _open_pr_cache[repo] = (time.monotonic(), prs)
+    return prs
+
+
+def _open_pr_for(ticket, config: JarvisConfig) -> str | None:
+    """The open JARVIS PR of a ticket (branch jarvis/<key>), in the repo its repo: label points to."""
+    from jarvis.steps.find_repo import choose_repo
+
+    try:
+        repo, _reason = choose_repo(ticket, config)
+    except ValueError:
+        return None
+    return _open_prs(repo).get(f"{config.git.branch_prefix}{ticket.key.lower()}")
+
+
 @app.get("/api/tickets")
 def list_tickets(project: str = "JW") -> list[dict]:
     if not _PROJECT_RE.match(project):
         raise HTTPException(status_code=422, detail="invalid project key")
-    tickets = JiraClient(_get_config().jira).search_open(project)
+    config = _get_config()
+    tickets = JiraClient(config.jira).search_open(project)
     return [
-        {"key": t.key, "summary": t.summary, "status": t.status, "type": t.issue_type, "url": t.url}
+        {"key": t.key, "summary": t.summary, "status": t.status, "type": t.issue_type, "url": t.url,
+         "open_pr": _open_pr_for(t, config)}
         for t in tickets
     ]
 

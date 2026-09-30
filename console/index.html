@@ -98,6 +98,13 @@
   .mic.busy { border-color: var(--cyan); color: var(--cyan); background: radial-gradient(circle, rgba(0,212,255,.25), rgba(0,30,60,.7)); box-shadow: 0 0 20px rgba(0,212,255,.4); }
   .mic.busy .mic-label { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
   @keyframes micpulse { 0% { box-shadow: 0 0 0 0 rgba(255,59,92,.8), 0 0 30px rgba(255,59,92,.8); } 100% { box-shadow: 0 0 0 26px rgba(255,59,92,0), 0 0 30px rgba(255,59,92,.8); } }
+  .pr-warn { margin-top: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,176,32,.55); background: rgba(255,176,32,.08);
+    color: var(--amber); font: 600 15px/1.4 var(--ui); }
+  .pr-warn[hidden] { display: none; }
+  .pr-warn a { color: var(--amber); border-bottom-color: rgba(255,176,32,.6); }
+  .pr-badge { margin-left: 8px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--amber); color: var(--amber);
+    font: 700 9px/1 var(--display); letter-spacing: 1.5px; text-transform: uppercase; }
+  .pr-badge:hover { text-shadow: 0 0 8px var(--amber); }
   .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 10px auto 0; max-width: 820px; }
   .choices[hidden] { display: none; }
   .choice { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding: 8px 14px; border-radius: 999px;
@@ -439,6 +446,8 @@
     <button id="reloadBtn" class="icon-btn" type="button" data-i18n-title="reload" data-i18n-aria="reload">↻</button>
   </div>
 
+  <div id="prWarn" class="pr-warn" role="status" hidden></div>
+
   <div id="stage" class="stage idle hud">
     <div class="core-glow" aria-hidden="true"></div>
     <svg class="orbits" viewBox="0 0 400 400" aria-hidden="true">
@@ -479,7 +488,7 @@
 
   <div class="controls">
     <label class="holo-toggle">
-      <input id="dryRun" type="checkbox" checked>
+      <input id="dryRun" type="checkbox" checked autocomplete="off">
       <span class="track"></span>
       <span class="toggle-text"><b id="dryTitle"></b><span id="dryLabel"></span></span>
     </label>
@@ -611,6 +620,8 @@
       logStarted: "JARVIS online. Lauf {id} für {t} gestartet", logDry: " (Trockenlauf)", logPlanReady: "Plan bereit – warte auf Freigabe",
       logApproved: "Freigabe erteilt – Plan genehmigt", logRejected: "Freigabe verweigert – Plan abgelehnt", logComplete: "Mission abgeschlossen",
       logApprovalFailed: "Freigabe fehlgeschlagen: ", couldNotStart: "Start fehlgeschlagen: ", ticketsPrefix: "Tickets: ",
+      hasPr: "PR offen", prWarn: "Für dieses Ticket gibt es schon einen offenen PR. Ein neuer Lauf überschreibt dessen Code.", prWarnLink: "PR ansehen",
+      confirmHasPr: "Achtung: Dieses Ticket hat bereits einen offenen PR ({u}). Ein voller Lauf überschreibt den Code auf diesem Branch.",
       confirmFull: "Vollständiger Lauf für {t}: Nach Ihrer Freigabe pusht JARVIS einen Branch, öffnet einen Draft-PR und kommentiert das Jira-Ticket. Fortfahren?",
       st_done: "fertig", st_failed: "fehlgeschlagen", st_cancelled: "abgebrochen", st_running: "läuft", st_awaiting_approval: "wartet auf Freigabe", dry: "TROCKEN",
       micTitle: "Ticket per Sprache wählen (5 Sekunden)", micRec: "AUFNAHME...", micBusy: "ERKENNE...", heard: "Gehört:",
@@ -650,6 +661,8 @@
       logStarted: "JARVIS online. Run {id} engaged for {t}", logDry: " (dry run)", logPlanReady: "plan ready – waiting for approval",
       logApproved: "authorization granted – plan approved", logRejected: "authorization denied – plan rejected", logComplete: "mission complete",
       logApprovalFailed: "approval failed: ", couldNotStart: "Could not start: ", ticketsPrefix: "Tickets: ",
+      hasPr: "PR open", prWarn: "This ticket already has an open PR. A new run overwrites its code.", prWarnLink: "view PR",
+      confirmHasPr: "Warning: this ticket already has an open PR ({u}). A full run overwrites the code on that branch.",
       confirmFull: "Full run for {t}: after you approve the plan, JARVIS pushes a branch, opens a draft PR and comments on the Jira ticket. Continue?",
       st_done: "done", st_failed: "failed", st_cancelled: "cancelled", st_running: "running", st_awaiting_approval: "awaiting approval", dry: "DRY",
       micTitle: "Pick a ticket by voice (5 seconds)", micRec: "RECORDING...", micBusy: "RECOGNIZING...", heard: "Heard:",
@@ -832,17 +845,27 @@
     else if (!tickets.length) sel.appendChild(new Option(t("noTickets"), ""));
     else {
       sel.appendChild(new Option(t("selectTicket"), ""));
-      for (const tk of tickets) sel.appendChild(new Option(tk.key + "  ·  " + tk.summary + "   [" + tk.status + "]", tk.key));
+      for (const tk of tickets) sel.appendChild(new Option(tk.key + "  ·  " + tk.summary + "   [" + tk.status + "]" + (tk.open_pr ? "   ⚠ " + t("hasPr") : ""), tk.key));
       if (keep && tickets.some((tk) => tk.key === keep)) sel.value = keep;
     }
-    updateStart();
+    updateStart(); renderPrWarn();
+    if (lastRuns) renderHistory();                          // history badges need the PR info
+  }
+  const openPrOf = (key) => (Array.isArray(tickets) && (tickets.find((tk) => tk.key === key) || {}).open_pr) || null;
+  // Warning under the dropdown: this ticket already has an open JARVIS PR.
+  function renderPrWarn() {
+    const n = $("prWarn"), url = safeUrl(openPrOf($("ticketSelect").value));
+    n.replaceChildren(); n.hidden = !url;
+    if (!url) return;
+    const a = el("a", "", t("prWarnLink")); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    n.append(document.createTextNode("⚠ " + t("prWarn") + " "), a);
   }
   async function loadTickets(select) {
     try { tickets = await api("/api/tickets?project=JW"); say("runMsg", ""); }
     catch (e) { tickets = "error"; say("runMsg", t("ticketsPrefix") + e.message, "err"); }
     renderTicketOptions(select);
   }
-  $("ticketSelect").addEventListener("change", updateStart);
+  $("ticketSelect").addEventListener("change", () => { updateStart(); renderPrWarn(); });
   $("reloadBtn").addEventListener("click", () => loadTickets($("ticketSelect").value));
   function renderDryToggle() {
     const dry = $("dryRun").checked;
@@ -854,7 +877,7 @@
   $("startBtn").addEventListener("click", async () => {
     const ticket = $("ticketSelect").value; if (!ticket) return;
     const dryRun = $("dryRun").checked;
-    if (!dryRun && !confirm(t("confirmFull", { t: ticket }))) return;
+    if (!dryRun && !confirm(t("confirmFull", { t: ticket }) + (openPrOf(ticket) ? "\n\n⚠ " + t("confirmHasPr", { u: openPrOf(ticket) }) : ""))) return;
     const btn = $("startBtn");
     btn.classList.remove("pulse"); void btn.offsetWidth; btn.classList.add("pulse");
     btn.disabled = true; say("runMsg", "");
@@ -1081,7 +1104,10 @@
     thead.appendChild(head); table.appendChild(thead);
     for (const r of lastRuns) {
       const tr = el("tr");
-      const tk = el("td", "mono", r.ticket_id); if (r.dry_run) tk.appendChild(el("span", "dry", t("dry"))); tr.appendChild(tk);
+      const tk = el("td", "mono", r.ticket_id); if (r.dry_run) tk.appendChild(el("span", "dry", t("dry")));
+      const prOpen = safeUrl(openPrOf(r.ticket_id));
+      if (prOpen) { const b = el("a", "pr-badge", t("hasPr")); b.href = prOpen; b.target = "_blank"; b.rel = "noopener noreferrer"; b.title = prOpen; tk.appendChild(b); }
+      tr.appendChild(tk);
       const st = el("td"); st.appendChild(el("span", "pill " + r.status, t("st_" + r.status))); tr.appendChild(st);
       tr.appendChild(el("td", "mono", r.duration_seconds != null ? r.duration_seconds + "s" : "–"));
       const pr = el("td"), u = safeUrl(r.pr_url);
@@ -1432,9 +1458,14 @@
   function saveWake() { try { localStorage.setItem("jarvis.wake", wakeOn ? "on" : "off"); } catch (_) { /* storage blocked */ } }
   $("wakeBtn").addEventListener("click", () => { wakeOn = !wakeOn; saveWake(); if (wakeOn) startWake(); else stopWake(); });
 
+  // Demo safety: every page load starts in dry-run. A real run needs the explicit toggle plus the confirm dialog.
+  function resetDryRun() { $("dryRun").checked = true; renderDryToggle(); }
+  addEventListener("pageshow", resetDryRun);                // also after "back" (page restored from cache)
+
   buildSteps();
   renderMic();
   applyLang();
+  resetDryRun();
   if (wakeOn) startWake();
   ping(); setInterval(ping, 4000);
 })();

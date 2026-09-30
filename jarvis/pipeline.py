@@ -26,7 +26,7 @@ from jarvis.steps.find_repo import choose_repo
 from jarvis.steps.jira_comment import jira_comment, jira_failure_comment, jira_plan_comment
 from jarvis.steps.notify import notify, notify_failure, notify_plan
 from jarvis.steps.plan import create_plan
-from jarvis.steps.read_repo import read_repo
+from jarvis.steps.read_repo import read_repo, remove_clone
 from jarvis.steps.read_ticket import read_ticket
 from jarvis.steps.repair import repair
 from jarvis.steps.review import review
@@ -74,6 +74,7 @@ def execute_run(
         started_at=datetime.now(timezone.utc).isoformat(),
     )
 
+    repo_map = None
     try:
         machine.transition(RunState.READ_TICKET)
         ticket = read_ticket(ticket_id, config)
@@ -129,6 +130,8 @@ def execute_run(
     finally:
         result.state = machine.state
         result.ended_at = datetime.now(timezone.utc).isoformat()
+        if repo_map is not None:  # the clone is only needed during the run
+            remove_clone(repo_map.local_path)
 
     return result
 

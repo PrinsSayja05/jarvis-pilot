@@ -11,6 +11,7 @@ from jarvis.clients.github_client import log_auth_mode
 from jarvis.config import ConfigError, JarvisConfig, load_config
 from jarvis.models.run import RunResult
 from jarvis.progress import ProgressTracker, print_banner
+from jarvis.steps.read_repo import cleanup_stale_clones
 from jarvis.pipeline import execute_run
 from jarvis.state import RunState
 from jarvis.steps.approval import print_plan, request_approval
@@ -114,6 +115,7 @@ def run(
         logger.error("Configuration error: %s", exc)
         raise typer.Exit(code=1) from exc
     log_auth_mode(config.github)
+    cleanup_stale_clones()
 
     talk = voice or demo
     narrate = (lambda text: speak_async(text, config)) if talk else None

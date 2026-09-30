@@ -75,7 +75,7 @@ class JiraClient:
         with httpx.Client(auth=self._auth, timeout=30) as client:
             response = client.get(
                 f"{self._base_url}/rest/api/3/search/jql",
-                params={"jql": jql, "maxResults": limit, "fields": "summary,issuetype,status"},
+                params={"jql": jql, "maxResults": limit, "fields": "summary,issuetype,status,labels"},
             )
         response.raise_for_status()
         return [
@@ -85,6 +85,7 @@ class JiraClient:
                 description="",
                 issue_type=issue["fields"].get("issuetype", {}).get("name", ""),
                 status=issue["fields"].get("status", {}).get("name", ""),
+                labels=issue["fields"].get("labels", []),
                 url=f"{self._base_url}/browse/{issue['key']}",
             )
             for issue in response.json().get("issues", [])
