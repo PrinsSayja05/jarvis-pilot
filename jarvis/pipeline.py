@@ -260,9 +260,12 @@ def _code_test_review_pr(
 
     if not test_result.passed:  # nothing worth reviewing or shipping
         attempts = result.repair_result.attempts if result.repair_result else 0
+        # The diff is rejected, but it is what a human needs to see: it shows what JARVIS tried,
+        # and the defect is sometimes in the tests it wrote rather than in the source (JW-28).
         raise ManualInterventionNeeded(
             f"tests still failing after {attempts} repair attempts "
-            f"(failed={test_result.failed}, errors={test_result.errors}, exit_code={test_result.exit_code})"
+            f"(failed={test_result.failed}, errors={test_result.errors}, exit_code={test_result.exit_code})",
+            diff=change.diff,
         )
 
     machine.transition(RunState.REVIEW)
