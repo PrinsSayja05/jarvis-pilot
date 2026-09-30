@@ -6,6 +6,7 @@ hardcoded here or in jarvis.yaml.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -131,10 +132,25 @@ def _github_settings() -> GitHubSettings:
     return GitHubSettings(
         app_id=os.environ.get("GITHUB_APP_ID", "") if token else _require_env("GITHUB_APP_ID"),
         private_key_path=os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "") if token else _require_env("GITHUB_APP_PRIVATE_KEY_PATH"),
-        org=_require_env("GITHUB_ORG"),
-        pilot_repo=_require_env("GITHUB_PILOT_REPO"),
+        org=_require_github_name("GITHUB_ORG"),
+        pilot_repo=_require_github_name("GITHUB_PILOT_REPO"),
         token=token,
     )
+
+
+_GITHUB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
+def _require_github_name(name: str) -> str:
+    """An owner or repo name. A broken .env line (e.g. a token pasted onto it) must fail here and
+    never reach a URL or a log line, so the error names the variable but never shows its value."""
+    value = _require_env(name).strip()
+    if not _GITHUB_NAME.match(value):
+        raise ConfigError(
+            f"{name} is not a valid GitHub name (value hidden). Check .env: one KEY=value per line, "
+            f"only letters, digits, '.', '-' and '_'."
+        )
+    return value
 
 
 def load_config(path: str | Path = "jarvis.yaml") -> JarvisConfig:
