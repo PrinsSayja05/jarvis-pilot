@@ -14,6 +14,8 @@ class JiraTicket:
     url: str = ""
     acceptance_criteria: str = ""
     comments: list[TicketComment] = field(default_factory=list)
+    assignee_id: str = ""       # Jira accountId
+    assignee_name: str = ""
 
 
 @dataclass

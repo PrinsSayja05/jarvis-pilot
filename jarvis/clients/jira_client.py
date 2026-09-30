@@ -69,13 +69,14 @@ class JiraClient:
             and f.get("name", "").lower().startswith(_ACCEPTANCE_FIELD_NAMES)
         ]
 
-    def search_open(self, project: str, limit: int = 50) -> list[JiraTicket]:
-        """Open (not Done) tickets of a project, newest first. `project` must be a validated key."""
-        jql = f"project = {project} AND statusCategory != Done ORDER BY created DESC"
+    def search_open(self, project: str, limit: int = 50, assignee_id: str | None = None) -> list[JiraTicket]:
+        """Open (not Done) tickets of a project, newest first. `project` and `assignee_id` must be validated."""
+        who = f' AND assignee = "{assignee_id}"' if assignee_id else ""
+        jql = f"project = {project}{who} AND statusCategory != Done ORDER BY created DESC"
         with httpx.Client(auth=self._auth, timeout=30) as client:
             response = client.get(
                 f"{self._base_url}/rest/api/3/search/jql",
-                params={"jql": jql, "maxResults": limit, "fields": "summary,issuetype,status,labels"},
+                params={"jql": jql, "maxResults": limit, "fields": "summary,issuetype,status,labels,assignee"},
             )
         response.raise_for_status()
         return [
@@ -87,9 +88,32 @@ class JiraClient:
                 status=issue["fields"].get("status", {}).get("name", ""),
                 labels=issue["fields"].get("labels", []),
                 url=f"{self._base_url}/browse/{issue['key']}",
+                assignee_id=(issue["fields"].get("assignee") or {}).get("accountId", ""),
+                assignee_name=(issue["fields"].get("assignee") or {}).get("displayName", ""),
             )
             for issue in response.json().get("issues", [])
         ]
+
+    def find_account_by_email(self, email: str) -> tuple[str, str] | None:
+        """(accountId, displayName) of the Jira user with this e-mail. Jira finds users by e-mail even when
+        their profile hides the address, so this is the reliable link from a Keycloak login to Jira."""
+        with httpx.Client(auth=self._auth, timeout=15) as client:
+            response = client.get(f"{self._base_url}/rest/api/3/user/search", params={"query": email})
+        response.raise_for_status()
+        users = [u for u in response.json() if u.get("accountType") == "atlassian" and u.get("active", True)]
+        exact = [u for u in users if (u.get("emailAddress") or "").lower() == email.lower()]
+        match = exact or (users if len(users) == 1 else [])
+        return (match[0]["accountId"], match[0].get("displayName", "")) if match else None
+
+    def assignees_of(self, keys: list[str]) -> dict[str, str]:
+        """{ticket key: assignee accountId} for the given (validated) keys, open or closed."""
+        if not keys:
+            return {}
+        with httpx.Client(auth=self._auth, timeout=30) as client:
+            response = client.post(f"{self._base_url}/rest/api/3/search/jql",
+                                   json={"jql": f"key in ({', '.join(keys)})", "fields": ["assignee"], "maxResults": len(keys)})
+        response.raise_for_status()
+        return {i["key"]: (i["fields"].get("assignee") or {}).get("accountId", "") for i in response.json().get("issues", [])}
 
     def create_issue(self, project: str, summary: str, description: str, issue_type: str = "Task") -> JiraTicket:
         paragraphs = [

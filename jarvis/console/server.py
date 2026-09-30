@@ -27,10 +27,12 @@ from typing import Any, Literal
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from jarvis.clients.jira_client import JiraClient
+from jarvis.console.auth import auth_mode, current_user
+from jarvis.console.auth import router as auth_router
 from jarvis.config import ConfigError, JarvisConfig, load_config
 from jarvis.models.plan import Plan
 from jarvis.models.run import RunResult
@@ -45,7 +47,8 @@ _INDEX_HTML = _ROOT / "console" / "index.html"
 _HISTORY_FILE = _ROOT / ".jarvis" / "console_history.json"
 
 # Local dev + the LAN addresses the jarvis-console service on SOKRATES-1 is opened from.
-_ALLOWED_ORIGINS = [
+# CONSOLE_EXTRA_ORIGINS (comma separated) adds more, e.g. a test instance on another port.
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CONSOLE_EXTRA_ORIGINS", "").split(",") if o.strip()] + [
     "null", "http://localhost:8090", "http://127.0.0.1:8090", "http://0.0.0.0:8090",
     "http://192.168.178.75:8090", "http://192.168.178.81:8090",
     "https://192.168.178.75:9443",  # HTTPS listener (jarvis.console.serve): browsers allow the mic only here
@@ -75,12 +78,33 @@ app.add_middleware(
 )
 
 
+# Reachable without a login even when Keycloak is active.
+_PUBLIC_PATHS = ("/auth/", "/api/health", "/api/whoami")
+
+
+@app.middleware("http")
+async def _require_login(request: Request, call_next):
+    """Keycloak active: no session -> the page redirects to the login, the API answers 401.
+    Keycloak not configured or unreachable: demo mode, nothing is locked (see jarvis.console.auth)."""
+    path = request.url.path
+    if not path.startswith(_PUBLIC_PATHS):
+        mode, _ = await asyncio.to_thread(auth_mode)
+        if mode == "keycloak" and current_user(request) is None:
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "login required"}, status_code=401)
+            return RedirectResponse(f"/auth/login?next={path}")
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def _local_origin_only(request: Request, call_next):
     origin = request.headers.get("origin")
     if origin is not None and origin not in _ALLOWED_ORIGINS:
         return JSONResponse({"detail": "origin not allowed"}, status_code=403)
     return await call_next(request)
+
+
+app.include_router(auth_router)
 
 
 # ---------------------------------------------------------------- run registry
@@ -159,6 +183,12 @@ def _save_history() -> None:
 
 
 _load_history()
+
+
+@app.on_event("startup")
+def _log_auth_mode() -> None:
+    mode, reason = auth_mode()
+    logger.info("startup: console auth mode = %s (%s)", mode, reason)
 
 
 @app.on_event("startup")
@@ -358,15 +388,86 @@ def _open_pr_for(ticket, config: JarvisConfig) -> str | None:
     return _open_prs(repo).get(f"{config.git.branch_prefix}{ticket.key.lower()}")
 
 
+_ACCOUNT_RE = re.compile(r"^[A-Za-z0-9:\-]{6,128}$")
+_account_cache: dict[str, tuple[float, tuple[str, str] | None]] = {}
+_people_cache: dict[str, tuple[float, list[dict]]] = {}
+_assignee_cache: dict[str, tuple[float, str]] = {}
+
+
+def _jira_account(email: str) -> tuple[str, str] | None:
+    """Keycloak e-mail -> (Jira accountId, name), cached for 10 minutes."""
+    hit = _account_cache.get(email.lower())
+    if hit and time.monotonic() - hit[0] < 600:
+        return hit[1]
+    try:
+        found = JiraClient(_get_config().jira).find_account_by_email(email) if email else None
+    except Exception as exc:
+        logger.warning("jira account lookup for %s failed: %s", email, type(exc).__name__)
+        return hit[1] if hit else None
+    _account_cache[email.lower()] = (time.monotonic(), found)
+    return found
+
+
+def _demo_people(project: str = "JW") -> list[dict]:
+    """The people the demo switcher offers: everyone who has open tickets in the project."""
+    hit = _people_cache.get(project)
+    if hit and time.monotonic() - hit[0] < 300:
+        return hit[1]
+    people: dict[str, str] = {}
+    for t in JiraClient(_get_config().jira).search_open(project, limit=100):
+        if t.assignee_id:
+            people[t.assignee_id] = t.assignee_name
+    result = sorted(({"account_id": a, "name": n} for a, n in people.items()), key=lambda p: p["name"].lower())
+    _people_cache[project] = (time.monotonic(), result)
+    return result
+
+
+def _view_as(request: Request, requested: str) -> str | None:
+    """Whose tickets and history to show. None = everybody (demo mode, "Alle").
+    Keycloak: the logged-in person; only an admin may pick someone else (demo switcher)."""
+    requested = requested.strip()
+    if requested and requested != "all" and not _ACCOUNT_RE.match(requested):
+        raise HTTPException(status_code=422, detail="invalid assignee")
+    mode, _ = auth_mode()
+    if mode != "keycloak":
+        return None if requested in ("", "all") else requested
+    user = current_user(request) or {}
+    if user.get("admin") and requested:
+        return None if requested == "all" else requested
+    account = _jira_account(user.get("email", ""))
+    return account[0] if account else "-"          # "-": logged in, but no Jira account -> nothing
+
+
+@app.get("/api/whoami")
+def whoami(request: Request) -> dict:
+    mode, reason = auth_mode()
+    user = current_user(request) if mode == "keycloak" else None
+    body: dict[str, Any] = {"mode": mode, "reason": reason, "user": None, "demo_people": []}
+    if user:
+        account = _jira_account(user.get("email", ""))
+        body["user"] = {"name": user.get("name"), "username": user.get("username"), "email": user.get("email"),
+                        "admin": bool(user.get("admin")), "jira_account_id": account[0] if account else None,
+                        "jira_name": account[1] if account else None}
+    if mode != "keycloak" or (user and user.get("admin")):
+        try:
+            body["demo_people"] = _demo_people()
+        except Exception as exc:
+            logger.warning("demo people lookup failed: %s", type(exc).__name__)
+    return body
+
+
 @app.get("/api/tickets")
-def list_tickets(project: str = "JW") -> list[dict]:
+def list_tickets(request: Request, project: str = "JW", assignee: str = "") -> list[dict]:
     if not _PROJECT_RE.match(project):
         raise HTTPException(status_code=422, detail="invalid project key")
     config = _get_config()
-    tickets = JiraClient(config.jira).search_open(project)
+    view = _view_as(request, assignee)
+    if view == "-":
+        return []
+    tickets = JiraClient(config.jira).search_open(project, assignee_id=view)
     return [
         {"key": t.key, "summary": t.summary, "status": t.status, "type": t.issue_type, "url": t.url,
-         "open_pr": _open_pr_for(t, config)}
+         "assignee": t.assignee_name, "open_pr": _open_pr_for(t, config)}
         for t in tickets
     ]
 
@@ -625,14 +726,32 @@ def chat(body: ChatRequest) -> dict:
 
 
 @app.get("/api/runs")
-def recent_runs(limit: int = 5) -> list[dict]:
-    return _history[: max(1, min(limit, _HISTORY_LIMIT))]
+def recent_runs(request: Request, limit: int = 5, assignee: str = "") -> list[dict]:
+    limit = max(1, min(limit, _HISTORY_LIMIT))
+    view = _view_as(request, assignee)
+    if view is None:
+        return _history[:limit]
+    if view == "-":
+        return []
+    keys = sorted({h["ticket_id"] for h in _history if _TICKET_RE.match(h.get("ticket_id", ""))})
+    stale = [k for k in keys if time.monotonic() - _assignee_cache.get(k, (0.0, ""))[0] > 60]
+    if stale:
+        try:
+            for k, a in JiraClient(_get_config().jira).assignees_of(stale).items():
+                _assignee_cache[k] = (time.monotonic(), a)
+        except Exception as exc:
+            logger.warning("assignee lookup for history failed: %s", type(exc).__name__)
+    return [h for h in _history if _assignee_cache.get(h["ticket_id"], (0.0, ""))[1] == view][:limit]
 
 
 @app.websocket("/ws/{run_id}")
 async def stream_run(websocket: WebSocket, run_id: str) -> None:
     origin = websocket.headers.get("origin")
     if origin is not None and origin not in _ALLOWED_ORIGINS:
+        await websocket.close(code=1008)
+        return
+    mode, _ = await asyncio.to_thread(auth_mode)
+    if mode == "keycloak" and current_user(websocket) is None:
         await websocket.close(code=1008)
         return
     record = _runs.get(run_id)

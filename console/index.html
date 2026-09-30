@@ -73,6 +73,19 @@
   .voice-btn.off svg { filter: none; }
   .voice-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
   #approvalHeard { margin-top: 14px; }
+  .user-box { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/1.2 var(--ui); color: var(--text); }
+  .user-box .who { font-weight: 700; }
+  .auth-warn { color: var(--amber); font-size: 12px; }
+  .auth-badge { padding: 3px 8px; border-radius: 4px; font: 700 9px/1 var(--display); letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--green); border: 1px solid var(--green); background: rgba(0,255,157,.08); }
+  .user-box a.logout { font: 700 10px/1 var(--display); letter-spacing: 1.5px; color: var(--muted); border-bottom: 0; }
+  .user-box a.logout:hover { color: var(--cyan); }
+  .demo-pick { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px;
+    border: 1px dashed var(--amber); background: rgba(255,176,32,.08); color: var(--amber); font: 700 10px/1 var(--display); letter-spacing: 1.5px; }
+  .demo-pick select { background: rgba(0,12,30,.9); color: var(--text); border: 1px solid rgba(255,176,32,.5); border-radius: 999px;
+    padding: 5px 8px; font: 600 13px/1 var(--ui); cursor: pointer; }
+  .demo-pick select:focus-visible, .demo-toggle input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .demo-toggle { display: inline-flex; align-items: center; gap: 4px; font: 700 9px/1 var(--display); letter-spacing: 1.5px; color: var(--muted); cursor: pointer; }
   .wake-btn { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; border-radius: 999px; cursor: pointer;
     font: 700 10px/1 var(--display); letter-spacing: 2px; color: var(--muted); border: 1px solid var(--line-2); background: rgba(0,25,55,.7); transition: all .25s; }
   .wake-btn[aria-pressed="true"] { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 16px rgba(0,212,255,.35); }
@@ -175,6 +188,7 @@
   .icon-btn { width: 62px; flex: none; border-radius: 12px; border: 1px solid var(--line-2); background: rgba(0,20,45,.75); color: var(--cyan); font-size: 22px; cursor: pointer; transition: box-shadow .2s, transform .3s; }
   .icon-btn:hover { box-shadow: 0 0 22px rgba(0,212,255,.45); }
   .icon-btn:active { transform: rotate(180deg); }
+  svg[hidden] { display: none !important; }   /* SVG ignores the hidden attribute without this */
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
   /* ---------- reactor / stage ---------- */
@@ -426,6 +440,7 @@
     <div class="spacer"></div>
     <div class="conn"><span id="dot" class="dot" role="status"></span><span id="conn"></span></div>
     <div class="clock" aria-live="off"><span id="clockTime">--:--:--</span><small id="clockDate"></small></div>
+    <div id="userBox" class="user-box" aria-live="polite"></div>
     <button id="wakeBtn" class="wake-btn" type="button" aria-pressed="false"><span class="wake-dot" aria-hidden="true"></span><span id="wakeLabel">WAKE WORD</span></button>
     <button id="voiceBtn" class="voice-btn" type="button" aria-pressed="true">
       <svg id="voiceOnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
@@ -620,6 +635,8 @@
       logStarted: "JARVIS online. Lauf {id} für {t} gestartet", logDry: " (Trockenlauf)", logPlanReady: "Plan bereit – warte auf Freigabe",
       logApproved: "Freigabe erteilt – Plan genehmigt", logRejected: "Freigabe verweigert – Plan abgelehnt", logComplete: "Mission abgeschlossen",
       logApprovalFailed: "Freigabe fehlgeschlagen: ", couldNotStart: "Start fehlgeschlagen: ", ticketsPrefix: "Tickets: ",
+      authBadge: "angemeldet", logout: "ABMELDEN", demoLabel: "DEMO:", demoAll: "Alle", demoToggle: "DEMO-MODUS",
+      demoTitle: "Demo-Modus: Ansicht wie diese Person (keine echte Anmeldung)", noJira: "kein Jira-Konto zu {e}",
       hasPr: "PR offen", prWarn: "Für dieses Ticket gibt es schon einen offenen PR. Ein neuer Lauf überschreibt dessen Code.", prWarnLink: "PR ansehen",
       confirmHasPr: "Achtung: Dieses Ticket hat bereits einen offenen PR ({u}). Ein voller Lauf überschreibt den Code auf diesem Branch.",
       confirmFull: "Vollständiger Lauf für {t}: Nach Ihrer Freigabe pusht JARVIS einen Branch, öffnet einen Draft-PR und kommentiert das Jira-Ticket. Fortfahren?",
@@ -661,6 +678,8 @@
       logStarted: "JARVIS online. Run {id} engaged for {t}", logDry: " (dry run)", logPlanReady: "plan ready – waiting for approval",
       logApproved: "authorization granted – plan approved", logRejected: "authorization denied – plan rejected", logComplete: "mission complete",
       logApprovalFailed: "approval failed: ", couldNotStart: "Could not start: ", ticketsPrefix: "Tickets: ",
+      authBadge: "signed in", logout: "SIGN OUT", demoLabel: "DEMO:", demoAll: "Everyone", demoToggle: "DEMO MODE",
+      demoTitle: "Demo mode: view as this person (not a real login)", noJira: "no Jira account for {e}",
       hasPr: "PR open", prWarn: "This ticket already has an open PR. A new run overwrites its code.", prWarnLink: "view PR",
       confirmHasPr: "Warning: this ticket already has an open PR ({u}). A full run overwrites the code on that branch.",
       confirmFull: "Full run for {t}: after you approve the plan, JARVIS pushes a branch, opens a draft PR and comments on the Jira ticket. Continue?",
@@ -704,11 +723,11 @@
     document.querySelectorAll("[data-i18n-title]").forEach((n) => { n.title = t(n.dataset.i18nTitle); });
     document.querySelectorAll("[data-i18n-aria]").forEach((n) => { n.setAttribute("aria-label", t(n.dataset.i18nAria)); });
     $("langCode").textContent = lang.toUpperCase();
-    $("flagDe").hidden = lang !== "de"; $("flagEn").hidden = lang !== "en";
+    $("flagDe").toggleAttribute("hidden", lang !== "de"); $("flagEn").toggleAttribute("hidden", lang !== "en");
     $("langBtn").setAttribute("aria-label", lang === "de" ? "Sprache: Deutsch – auf Englisch wechseln" : "Language: English – switch to German");
     renderDryToggle(); renderPhase(); renderConn(); renderTicketOptions(); renderStepLabels(); renderClock();
     if (lastResult) renderResult(); if (lastRuns) renderHistory();
-    renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn(); wakeUiState = ""; if (typeof renderWake === "function") renderWake();
+    renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn(); if (auth.mode) renderUserBox(); wakeUiState = ""; if (typeof renderWake === "function") renderWake();
   }
   $("langBtn").addEventListener("click", () => {
     lang = lang === "de" ? "en" : "de";
@@ -783,6 +802,7 @@
 
   async function api(path, opts) {
     const res = await fetch(API + path, opts);
+    if (res.status === 401 && auth.mode === "keycloak") { location.href = "/auth/login?next=/"; throw new Error("login required"); }
     let body = null;
     try { body = await res.json(); } catch (_) { /* no body */ }
     if (!res.ok) {
@@ -804,7 +824,7 @@
   async function ping() {
     let ok = false;
     try { ok = (await api("/api/health")).status === "ok"; } catch (_) { ok = false; }
-    if (ok && !connected) { loadTickets(); loadHistory(); loadPublicConfig(); }
+    if (ok && !connected) { loadWhoami().then(() => { loadTickets(); loadHistory(); }); loadPublicConfig(); }
     connected = ok; renderConn();
   }
 
@@ -814,6 +834,54 @@
       const c = await api("/api/config");
       if (/^[\w.-]+$/.test(c.github_org) && /^[\w.-]+$/.test(c.pilot_repo)) $("githubLink").href = "https://github.com/" + c.github_org + "/" + c.pilot_repo;
     } catch (_) { /* link keeps pointing at github.com */ }
+  }
+
+  /* ---------- who is looking: Keycloak login, or the demo switcher (clearly marked as demo) ---------- */
+  let auth = { mode: "", user: null, demo_people: [] };
+  let demoPerson = "all", demoOn = false;
+  try { demoPerson = localStorage.getItem("jarvis.demoPerson") || "all"; demoOn = localStorage.getItem("jarvis.demoOn") === "on"; } catch (_) { /* storage blocked */ }
+  const demoActive = () => auth.mode !== "keycloak" || (auth.user && auth.user.admin && demoOn);
+  // Empty = the server decides (Keycloak: the logged-in person). Demo: the picked person, or everybody.
+  const viewParam = () => demoActive() ? "&assignee=" + encodeURIComponent(demoPerson || "all") : "";
+  async function loadWhoami() {
+    try { auth = await api("/api/whoami"); } catch (_) { auth = { mode: "demo", user: null, demo_people: [] }; }
+    if (!auth.demo_people.some((p) => p.account_id === demoPerson)) demoPerson = "all";
+    renderUserBox();
+  }
+  function renderUserBox() {
+    const box = $("userBox"); box.replaceChildren();
+    const picker = () => {
+      const wrap = el("label", "demo-pick"), sel = el("select");
+      wrap.append(document.createTextNode(t("demoLabel")), sel);
+      sel.appendChild(new Option(t("demoAll"), "all"));
+      for (const p of auth.demo_people) sel.appendChild(new Option(p.name, p.account_id));
+      sel.value = demoPerson;
+      sel.title = t("demoTitle");
+      sel.addEventListener("change", () => {
+        demoPerson = sel.value;
+        try { localStorage.setItem("jarvis.demoPerson", demoPerson); } catch (_) { /* storage blocked */ }
+        loadTickets(); loadHistory();
+      });
+      return wrap;
+    };
+    if (auth.mode === "keycloak" && auth.user) {
+      const u = auth.user;
+      box.append(el("span", "who", u.name || u.username), el("span", "auth-badge", t("authBadge")));
+      if (!u.jira_account_id) box.appendChild(el("span", "auth-warn", "⚠ " + t("noJira", { e: u.email || "?" })));
+      if (u.admin) {
+        const tog = el("label", "demo-toggle"), cb = el("input"); cb.type = "checkbox"; cb.checked = demoOn;
+        cb.addEventListener("change", () => {
+          demoOn = cb.checked;
+          try { localStorage.setItem("jarvis.demoOn", demoOn ? "on" : "off"); } catch (_) { /* storage blocked */ }
+          renderUserBox(); loadTickets(); loadHistory();
+        });
+        tog.append(cb, document.createTextNode(t("demoToggle"))); box.appendChild(tog);
+        if (demoOn) box.appendChild(picker());
+      }
+      const out = el("a", "logout", t("logout")); out.href = "/auth/logout"; box.appendChild(out);
+    } else {
+      box.appendChild(picker());                                      // no real login: demo switcher only
+    }
   }
 
   /* ---------- create ticket ---------- */
@@ -861,7 +929,7 @@
     n.append(document.createTextNode("⚠ " + t("prWarn") + " "), a);
   }
   async function loadTickets(select) {
-    try { tickets = await api("/api/tickets?project=JW"); say("runMsg", ""); }
+    try { tickets = await api("/api/tickets?project=JW" + viewParam()); say("runMsg", ""); }
     catch (e) { tickets = "error"; say("runMsg", t("ticketsPrefix") + e.message, "err"); }
     renderTicketOptions(select);
   }
@@ -1091,7 +1159,7 @@
 
   /* ---------- history ---------- */
   async function loadHistory() {
-    try { lastRuns = await api("/api/runs?limit=5"); }
+    try { lastRuns = await api("/api/runs?limit=5" + viewParam()); }
     catch (_) { lastRuns = "offline"; }
     renderHistory();
   }
@@ -1217,7 +1285,7 @@
   function renderVoiceBtn() {
     $("voiceBtn").setAttribute("aria-pressed", String(voiceOn));
     $("voiceBtn").classList.toggle("off", !voiceOn);
-    $("voiceOnIcon").hidden = !voiceOn; $("voiceOffIcon").hidden = voiceOn;
+    $("voiceOnIcon").toggleAttribute("hidden", !voiceOn); $("voiceOffIcon").toggleAttribute("hidden", voiceOn);
     $("voiceBtn").title = t(voiceOn ? "voiceOnTitle" : "voiceOffTitle");
     $("voiceBtn").setAttribute("aria-label", t(voiceOn ? "voiceOnTitle" : "voiceOffTitle"));
   }
