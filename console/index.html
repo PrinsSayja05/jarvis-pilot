@@ -73,6 +73,14 @@
   .voice-btn.off svg { filter: none; }
   .voice-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
   #approvalHeard { margin-top: 14px; }
+  .wake-btn { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+    font: 700 10px/1 var(--display); letter-spacing: 2px; color: var(--muted); border: 1px solid var(--line-2); background: rgba(0,25,55,.7); transition: all .25s; }
+  .wake-btn[aria-pressed="true"] { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 16px rgba(0,212,255,.35); }
+  .wake-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  .wake-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .wake-btn.listening .wake-dot { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: blip 1.6s ease-in-out infinite; }
+  .wake-btn.paused .wake-dot { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: none; }
+  .stage.woke svg.head { opacity: 1; filter: drop-shadow(0 0 14px var(--cyan)) drop-shadow(0 0 34px var(--cyan)); animation: pop .6s ease-out; }
 
   /* mic button */
   .action-row { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
@@ -411,6 +419,7 @@
     <div class="spacer"></div>
     <div class="conn"><span id="dot" class="dot" role="status"></span><span id="conn"></span></div>
     <div class="clock" aria-live="off"><span id="clockTime">--:--:--</span><small id="clockDate"></small></div>
+    <button id="wakeBtn" class="wake-btn" type="button" aria-pressed="false"><span class="wake-dot" aria-hidden="true"></span><span id="wakeLabel">WAKE WORD</span></button>
     <button id="voiceBtn" class="voice-btn" type="button" aria-pressed="true">
       <svg id="voiceOnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
       <svg id="voiceOffIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" hidden><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg>
@@ -615,6 +624,7 @@
       apprUseButtons: "Keine klare Antwort. Bitte mit dem Knopf freigeben oder ablehnen.", apprHighRisk: "Hohes Risiko: Freigabe nur per Knopf, nicht per Sprache.",
       apprNoMic: "Sprachfreigabe braucht HTTPS: {u}", apprFailed: "Sprachfreigabe nicht möglich ({e}). Bitte Knopf benutzen.",
       logVoiceYes: "Sprachfreigabe: „{h}“ → genehmigt", logVoiceNo: "Sprachfreigabe: „{h}“ → abgelehnt",
+      wakeLabel: "WECKWORT", wakeTitleOn: "Weckwort an: sagen Sie „Hallo JARVIS“ (klicken zum Ausschalten)", wakeTitleOff: "Weckwort aus (klicken zum Einschalten)", wakeTitlePaused: "Weckwort pausiert, solange JARVIS arbeitet, spricht oder zuhört", wakeStarted: "Weckwort aktiv: sagen Sie „Hallo JARVIS“", wakeStopped: "Weckwort aus", logWake: "Weckwort erkannt: „{h}“ → höre auf den Befehl", logWakeCommand: "Weckwort und Befehl erkannt: „{h}“", logWakeMiss: "kein Weckwort: „{h}“", wakeNothing: "nach dem Weckwort nichts Verwertbares gehört („{h}“), zurück in Bereitschaft", wakeCheckFailed: "Weckwort-Prüfung fehlgeschlagen: ", logWakeBuffered: "Befehl kam schon während der Prüfung, wird verwendet", voiceDuringRun: "während eines Laufs gehört („{h}“), nicht übernommen",
       steps: ["Ticket", "Repo", "Klonen", "Plan", "Freigabe", "Code", "Tests", "Review", "PR", "Info"],
     },
     en: {
@@ -653,6 +663,7 @@
       apprUseButtons: "No clear answer. Please use the buttons.", apprHighRisk: "High risk: approval by button only, not by voice.",
       apprNoMic: "Voice approval needs HTTPS: {u}", apprFailed: "Voice approval not possible ({e}). Please use the buttons.",
       logVoiceYes: "voice approval: “{h}” → approved", logVoiceNo: "voice approval: “{h}” → rejected",
+      wakeLabel: "WAKE WORD", wakeTitleOn: "Wake word on: say “Hello JARVIS” (click to turn off)", wakeTitleOff: "Wake word off (click to turn on)", wakeTitlePaused: "Wake word paused while JARVIS works, speaks or listens", wakeStarted: "wake word active: say “Hello JARVIS”", wakeStopped: "wake word off", logWake: "wake word heard: “{h}” → listening for the command", logWakeCommand: "wake word and command heard: “{h}”", logWakeMiss: "no wake word: “{h}”", wakeNothing: "nothing usable after the wake word (“{h}”), back to idle", wakeCheckFailed: "wake word check failed: ", logWakeBuffered: "command was spoken during the check, using it", voiceDuringRun: "heard during a run (“{h}”), not applied",
       steps: ["Ticket", "Repo", "Clone", "Plan", "Approval", "Code", "Tests", "Review", "PR", "Notify"],
     },
   };
@@ -684,7 +695,7 @@
     $("langBtn").setAttribute("aria-label", lang === "de" ? "Sprache: Deutsch – auf Englisch wechseln" : "Language: English – switch to German");
     renderDryToggle(); renderPhase(); renderConn(); renderTicketOptions(); renderStepLabels(); renderClock();
     if (lastResult) renderResult(); if (lastRuns) renderHistory();
-    renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn();
+    renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn(); wakeUiState = ""; if (typeof renderWake === "function") renderWake();
   }
   $("langBtn").addEventListener("click", () => {
     lang = lang === "de" ? "en" : "de";
@@ -1138,27 +1149,39 @@
   const sendAudio = (blob, purpose) => api("/api/voice-input?purpose=" + (purpose || "ticket"),
     { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
 
-  $("micBtn").addEventListener("click", async () => {
+  // A recognised ticket request (from the mic button, the wake word, or both in one breath).
+  function applyVoiceResult(r) {
+    if (runActive()) { voiceLog("🎤 " + t("voiceDuringRun", { h: (r.transcript || "").trim() || "…" }), "m"); return; }   // never change the ticket mid-run
+    heardState = { transcript: r.transcript || "", status: r.status, ticket: r.ticket_id, candidate: r.candidate,
+                   project: r.project, summary: r.summary, openTickets: r.open_tickets || [] };
+    voiceLog("🎤 " + r.log, r.status === "found" ? "g" : "e");
+    if (r.status === "found") {
+      if (tickets === null || tickets === "error" || !tickets.some((tk) => tk.key === r.ticket_id)) loadTickets(r.ticket_id);
+      else { $("ticketSelect").value = r.ticket_id; updateStart(); }
+    }
+    if (r.say && voiceOn) speak(r.say);
+    renderHeard();
+  }
+  // Record the command and resolve it. quiet (after the wake word): nothing usable -> back to idle, only a log line.
+  async function listenForCommand(quiet) {
     if (micState !== "idle") return;
-    if (!micAvailable()) { heardState = { error: "micInsecure", params: { h: location.host || HOST } }; renderHeard(); return; }
-    heardState = null; renderHeard();
+    if (!micAvailable()) { if (!quiet) { heardState = { error: "micInsecure", params: { h: location.host || HOST } }; renderHeard(); } return; }
+    if (!quiet) { heardState = null; renderHeard(); }
     let blob;
     try { setMic("recording"); blob = await recordClip(MIC_SECONDS); }
-    catch (_) { heardState = { error: "micDenied" }; renderHeard(); setMic("idle"); return; }
+    catch (_) { if (!quiet) { heardState = { error: "micDenied" }; renderHeard(); } setMic("idle"); return; }
     setMic("busy");
     try {
       const r = await sendAudio(blob);
-      heardState = { transcript: r.transcript || "", status: r.status, ticket: r.ticket_id, candidate: r.candidate,
-                     project: r.project, summary: r.summary, openTickets: r.open_tickets || [] };
-      voiceLog("🎤 " + r.log, r.status === "found" ? "g" : "e");
-      if (r.status === "found") {
-        if (tickets === null || tickets === "error" || !tickets.some((tk) => tk.key === r.ticket_id)) loadTickets(r.ticket_id);
-        else { $("ticketSelect").value = r.ticket_id; updateStart(); }
-      }
-      if (r.say && voiceOn) speak(r.say);
-    } catch (e) { heardState = { error: "micFailed", extra: e.message }; voiceLog("🎤 " + t("micFailed") + e.message, "e"); }
-    renderHeard(); setMic("idle");
-  });
+      if (quiet && r.status === "nothing") voiceLog("🎤 " + t("wakeNothing", { h: (r.transcript || "").trim() || "…" }), "m");
+      else applyVoiceResult(r);
+    } catch (e) {
+      if (quiet) voiceLog("🎤 " + t("micFailed") + e.message, "m");
+      else { heardState = { error: "micFailed", extra: e.message }; renderHeard(); voiceLog("🎤 " + t("micFailed") + e.message, "e"); }
+    }
+    setMic("idle");
+  }
+  $("micBtn").addEventListener("click", () => listenForCommand(false));
 
   /* ---------- voice output: lines are played one after another via /api/speak ---------- */
   let voiceOn = true;
@@ -1278,9 +1301,141 @@
     $("chatSend").disabled = false; $("chatInput").focus(); $("chatLog").scrollTop = $("chatLog").scrollHeight;
   });
 
+  /* ---------- wake word: speech is detected in the browser; only short clips go to /api/wake-check ---------- */
+  const WAKE = { minSpeechMs: 250, endSilenceMs: 700, maxClipMs: 6000, preRollMs: 400, cooldownMs: 2000, floorMin: 0.012 };
+  let wakeOn = false;
+  try { wakeOn = localStorage.getItem("jarvis.wake") === "on"; } catch (_) { /* storage blocked */ }
+  let wake = null;                  // {ctx, stream, node, floor, pre, seg, speaking, speechMs, silenceMs}
+  let wakeChecking = false, wakeCooldownUntil = 0, wakeUiState = "";
+  let pendingClips = [];            // speech that started while a wake check was still running
+  // Never while JARVIS works, talks, waits for approval, or records for the mic button.
+  const wakeBlocked = () => runActive() || !!currentAudio || micState !== "idle"
+    || !!(activeRecorder && activeRecorder.state === "recording") || Date.now() < wakeCooldownUntil;
+  function renderWake() {
+    const b = $("wakeBtn"), state = !wakeOn ? "off" : !wake ? "starting" : wakeBlocked() ? "paused" : "listening";
+    if (state === wakeUiState) return;
+    wakeUiState = state;
+    b.setAttribute("aria-pressed", String(wakeOn));
+    b.classList.toggle("listening", state === "listening" && !wakeChecking); b.classList.toggle("paused", state === "paused");
+    b.title = t(state === "off" ? "wakeTitleOff" : state === "paused" ? "wakeTitlePaused" : "wakeTitleOn");
+    $("wakeLabel").textContent = t("wakeLabel");
+  }
+  function encodeWav(chunks, rate) {
+    const total = chunks.reduce((n, c) => n + c.length, 0), ratio = rate / 16000, out = new Int16Array(Math.floor(total / ratio));
+    const all = new Float32Array(total); let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+    for (let i = 0; i < out.length; i++) {                 // average down to 16 kHz
+      const a = Math.floor(i * ratio), b = Math.min(total, Math.floor((i + 1) * ratio)); let sum = 0;
+      for (let j = a; j < b; j++) sum += all[j];
+      out[i] = Math.max(-1, Math.min(1, sum / Math.max(1, b - a))) * 0x7fff;
+    }
+    const buf = new ArrayBuffer(44 + out.length * 2), v = new DataView(buf);
+    const str = (off, txt) => { for (let i = 0; i < txt.length; i++) v.setUint8(off + i, txt.charCodeAt(i)); };
+    str(0, "RIFF"); v.setUint32(4, 36 + out.length * 2, true); str(8, "WAVE"); str(12, "fmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 16000, true); v.setUint32(28, 32000, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, "data"); v.setUint32(40, out.length * 2, true);
+    new Int16Array(buf, 44).set(out);
+    return new Blob([buf], { type: "audio/wav" });
+  }
+  function wakeAck() {
+    burst(); $("stage").classList.add("woke"); setTimeout(() => $("stage").classList.remove("woke"), 1200);
+    try {                                                   // two short, quiet tones
+      const ctx = wake.ctx, g = ctx.createGain(); g.gain.value = 0.05; g.connect(ctx.destination);
+      [[660, 0], [880, 0.12]].forEach(([f, at]) => { const osc = ctx.createOscillator(); osc.frequency.value = f; osc.connect(g); osc.start(ctx.currentTime + at); osc.stop(ctx.currentTime + at + 0.09); });
+    } catch (_) { /* the sound is optional */ }
+  }
+  // Speech that was still being spoken when the check finished: wait for it (at most 3 s) and take it.
+  async function takePendingClip() {
+    const until = Date.now() + 3000;
+    while (wake && wake.speaking && Date.now() < until) await new Promise((ok) => setTimeout(ok, 100));
+    const clip = pendingClips.shift(); pendingClips = [];
+    return clip || null;
+  }
+  async function sendCommandClip(clip) {
+    setMic("busy");
+    try {
+      const r = await sendAudio(clip);
+      if (r.status === "nothing") voiceLog("🎤 " + t("wakeNothing", { h: (r.transcript || "").trim() || "…" }), "m");
+      else applyVoiceResult(r);
+    } catch (e) { voiceLog("🎤 " + t("micFailed") + e.message, "m"); }
+    setMic("idle");
+  }
+  async function checkClip(blob) {
+    wakeChecking = true; pendingClips = []; renderWake();
+    let next = null;
+    try {
+      const res = await fetch(API + "/api/wake-check", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: blob });
+      if (res.status === 429) return;                       // another check is still running
+      if (!res.ok) { voiceLog("👂 " + t("wakeCheckFailed") + res.status, "m"); return; }
+      const r = await res.json(), heard = (r.heard || "").trim() || "…";
+      if (!r.wake) {
+        if (r.heard && r.heard.trim()) voiceLog("👂 " + t("logWakeMiss", { h: heard }), "m");
+        next = pendingClips.shift() || null;               // someone kept talking: that clip gets its own check
+        return;
+      }
+      wakeAck();
+      if (r.ticket) { voiceLog("👂 " + t("logWakeCommand", { h: heard }), "g"); applyVoiceResult(r.ticket); return; }
+      voiceLog("👂 " + t("logWake", { h: heard }), "g");
+      const said = await takePendingClip();
+      wakeChecking = false;
+      if (said) { voiceLog("👂 " + t("logWakeBuffered"), "m"); await sendCommandClip(said); }
+      else { await new Promise((ok) => setTimeout(ok, 300)); await listenForCommand(true); }   // after the tone
+    } catch (e) { voiceLog("👂 " + t("wakeCheckFailed") + e.message, "m"); }
+    finally {
+      wakeChecking = false;
+      if (!next) wakeCooldownUntil = Date.now() + WAKE.cooldownMs;
+      renderWake();
+      if (next && wake) checkClip(next);
+    }
+  }
+  function onAudio(e) {
+    const w = wake; if (!w) return;
+    const x = e.inputBuffer.getChannelData(0), chunk = new Float32Array(x), ms = (x.length / w.ctx.sampleRate) * 1000;
+    let sum = 0; for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+    const rms = Math.sqrt(sum / x.length);
+    renderWake();
+    if (wakeBlocked()) { w.speaking = false; w.seg = []; w.pre = []; return; }
+    const threshold = Math.max(WAKE.floorMin, w.floor * 3.5);
+    if (!w.speaking) {
+      w.floor = w.floor * 0.98 + rms * 0.02;                // adaptive noise floor while quiet
+      w.pre.push(chunk); while (w.pre.length * ms > WAKE.preRollMs) w.pre.shift();
+      if (rms > threshold) { w.speaking = true; w.seg = w.pre.slice(); w.pre = []; w.speechMs = ms; w.silenceMs = 0; }
+      return;
+    }
+    w.seg.push(chunk);
+    if (rms > threshold) { w.speechMs += ms; w.silenceMs = 0; } else w.silenceMs += ms;
+    if (w.silenceMs >= WAKE.endSilenceMs || w.seg.length * ms >= WAKE.maxClipMs) {
+      const seg = w.seg; w.speaking = false; w.seg = [];
+      if (w.speechMs >= WAKE.minSpeechMs) {
+        const clip = encodeWav(seg, w.ctx.sampleRate);
+        if (wakeChecking) pendingClips.push(clip); else checkClip(clip);
+      }
+    }
+  }
+  async function startWake() {
+    if (wake) return;
+    if (!micAvailable()) { voiceLog("👂 " + t("micInsecure", { h: location.host || HOST }), "e"); wakeOn = false; saveWake(); renderWake(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const ctx = new (window.AudioContext || window.webkitAudioContext)(), node = ctx.createScriptProcessor(2048, 1, 1);
+      ctx.createMediaStreamSource(stream).connect(node); node.connect(ctx.destination);   // the output stays silent
+      node.onaudioprocess = onAudio;
+      wake = { ctx, stream, node, floor: WAKE.floorMin, pre: [], seg: [], speaking: false, speechMs: 0, silenceMs: 0 };
+      if (ctx.state === "suspended") document.addEventListener("click", () => ctx.resume(), { once: true });
+      voiceLog("👂 " + t("wakeStarted"), "m");
+    } catch (_) { voiceLog("👂 " + t("micDenied"), "e"); wakeOn = false; saveWake(); }
+    renderWake();
+  }
+  function stopWake() {
+    if (wake) { wake.node.disconnect(); wake.stream.getTracks().forEach((tr) => tr.stop()); wake.ctx.close(); wake = null; voiceLog("👂 " + t("wakeStopped"), "m"); }
+    renderWake();
+  }
+  function saveWake() { try { localStorage.setItem("jarvis.wake", wakeOn ? "on" : "off"); } catch (_) { /* storage blocked */ } }
+  $("wakeBtn").addEventListener("click", () => { wakeOn = !wakeOn; saveWake(); if (wakeOn) startWake(); else stopWake(); });
+
   buildSteps();
   renderMic();
   applyLang();
+  if (wakeOn) startWake();
   ping(); setInterval(ping, 4000);
 })();
 </script>

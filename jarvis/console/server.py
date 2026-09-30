@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -433,6 +434,100 @@ async def voice_input(request: Request, purpose: Literal["ticket", "answer"] = "
         open_tickets=result.open_tickets,
         log=result.log_line(),
     )
+    return body
+
+
+_MAX_WAKE_CLIP_BYTES = 1024 * 1024   # the browser sends at most ~6 s of 16 kHz WAV
+_wake_lock = asyncio.Lock()
+# The wake phrase only needs a small, fast model: tiny answers in ~0.4 s, large-v3 needs ~6 s on CAESAR.
+_WAKE_MODEL = os.environ.get("WAKE_WHISPER_MODEL", "Systran/faster-whisper-tiny")
+_WAKE_KEEP_WARM_SECONDS = 240         # the Whisper server unloads idle models; reloading tiny takes ~10 s
+_WAKE_KEEP_WARM_FOR = 30 * 60         # ...but only while someone actually uses the wake word
+_wake_last_used = 0.0
+_wake_warm_task: asyncio.Task | None = None
+
+
+async def _keep_wake_model_warm() -> None:
+    from jarvis.steps.voice_input import transcribe_audio
+
+    silence = _SILENT_WAV
+    while time.monotonic() - _wake_last_used < _WAKE_KEEP_WARM_FOR:
+        await asyncio.sleep(_WAKE_KEEP_WARM_SECONDS)
+        try:
+            await asyncio.to_thread(transcribe_audio, silence, _get_config(), filename="warm.wav", model=_WAKE_MODEL)
+        except Exception as exc:
+            logger.info("wake model keep-warm failed: %s", type(exc).__name__)
+
+
+def _silent_wav(seconds: float = 0.5, rate: int = 16000) -> bytes:
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(b"\x00\x00" * int(seconds * rate))
+    return buf.getvalue()
+
+
+_SILENT_WAV = _silent_wav()
+
+
+@app.post("/api/wake-check")
+async def wake_check(request: Request) -> dict:
+    """Is this short clip the wake phrase ("Hallo JARVIS")? The browser only sends a clip when it hears
+    speech, never a continuous stream. A command in the same breath is resolved to a ticket right away."""
+    if _wake_lock.locked():  # one check at a time: chatter must not queue up Whisper calls
+        raise HTTPException(status_code=429, detail="wake check busy")
+    audio = await request.body()
+    if not audio or len(audio) > _MAX_WAKE_CLIP_BYTES:
+        raise HTTPException(status_code=413 if audio else 422, detail="clip empty or too long")
+    from jarvis.steps.voice_input import transcribe_audio
+    from jarvis.steps.wake_word import find_wake_phrase
+
+    global _wake_last_used, _wake_warm_task
+    config = _get_config()
+    _wake_last_used = time.monotonic()
+    if _wake_warm_task is None or _wake_warm_task.done():
+        _wake_warm_task = asyncio.create_task(_keep_wake_model_warm())
+    async with _wake_lock:
+        try:
+            heard = await asyncio.to_thread(
+                transcribe_audio, audio, config, filename="wake.wav", content_type="audio/wav", model=_WAKE_MODEL
+            )
+        except Exception as exc:
+            logger.warning("wake check: transcription failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"Whisper not reachable: {type(exc).__name__}") from exc
+    wake = find_wake_phrase(heard)
+    accurate_done = False
+    if not wake.woke and wake.maybe:
+        # tiny heard a greeting and something name-like ("Hallo, JavaScript ..."): the accurate model decides
+        try:
+            second = await asyncio.to_thread(transcribe_audio, audio, config, filename="wake.wav", content_type="audio/wav")
+            logger.info("wake check: second opinion for %r -> %r", heard, second)
+            heard, wake, accurate_done = second, find_wake_phrase(second), True
+        except Exception as exc:
+            logger.info("wake check: second opinion failed (%s)", type(exc).__name__)
+    body: dict[str, Any] = {"wake": wake.woke, "heard": heard, "command": wake.command}
+    logger.info("wake check: heard=%r wake=%s command=%r model=%s", heard, wake.woke, wake.command, _WAKE_MODEL)
+    if wake.woke and len(wake.command.split()) >= 2:
+        # A command in the same breath: ticket numbers need the accurate model, so transcribe the clip again.
+        from jarvis.steps.ticket_speech import resolve_spoken_ticket
+
+        command = wake.command
+        if not accurate_done:
+            try:
+                accurate = await asyncio.to_thread(transcribe_audio, audio, config, filename="wake.wav", content_type="audio/wav")
+                again = find_wake_phrase(accurate)
+                heard, command = accurate, (again.command if again.woke else accurate)
+            except Exception as exc:
+                logger.info("wake check: accurate transcription failed (%s), using the fast one", type(exc).__name__)
+        body.update(heard=heard, command=command)
+        result = await asyncio.to_thread(resolve_spoken_ticket, command, JiraClient(config.jira))
+        body["ticket"] = {
+            "transcript": heard, "status": result.status, "ticket_id": result.ticket_id, "candidate": result.candidate,
+            "project": result.project, "summary": result.summary, "say": result.say,
+            "open_tickets": result.open_tickets, "log": result.log_line(),
+        }
     return body
 
 

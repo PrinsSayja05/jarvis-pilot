@@ -14,7 +14,9 @@ from jarvis.steps.ticket_speech import guess_ticket, resolve_spoken_ticket
 _SAMPLE_RATE = 16000
 TICKET_SECONDS = 5
 ANSWER_SECONDS = 3
-_WHISPER_MODEL = "Systran/faster-whisper-large-v3"
+# Commands (mic button, after the wake word, ja/nein). Measured 30.09.2026 on CAESAR with the same 24 test
+# clips: large-v3-turbo as accurate as large-v3, median 6.7 s vs 7.2 s. WHISPER_MODEL switches back if needed.
+_WHISPER_MODEL = os.environ.get("WHISPER_MODEL") or "deepdml/faster-whisper-large-v3-turbo-ct2"
 _LANGUAGE = "de"
 _TIMEOUT = httpx.Timeout(60, connect=5)  # fail fast when CAESAR's service is down
 # Primes Whisper with the spelling of project keys; without it "JW fünf" comes back as "Berber J. W. Fung".
@@ -60,6 +62,7 @@ def transcribe_audio(
     *,
     filename: str = "audio.wav",
     content_type: str = "audio/wav",
+    model: str | None = None,
 ) -> str:
     """Send the audio (WAV from the mic, or webm/ogg from a browser) to faster-whisper, return the transcript."""
     base = (config.voice.stt_url if config else os.environ.get("WHISPER_URL") or _DEFAULT_WHISPER_URL).rstrip("/")
@@ -67,7 +70,7 @@ def transcribe_audio(
         response = client.post(
             f"{base}/v1/audio/transcriptions",  # OpenAI-compatible API (faster-whisper-server)
             files={"file": (filename, audio, content_type)},
-            data={"model": _WHISPER_MODEL, "language": _LANGUAGE, "prompt": _WHISPER_PROMPT},
+            data={"model": model or _WHISPER_MODEL, "language": _LANGUAGE, "prompt": _WHISPER_PROMPT},
         )
         if response.status_code == 404:  # older whisper-asr-webservice API
             response = client.post(
