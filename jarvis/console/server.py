@@ -23,9 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from jarvis.clients.jira_client import JiraClient
@@ -46,8 +47,10 @@ _HISTORY_FILE = _ROOT / ".jarvis" / "console_history.json"
 _ALLOWED_ORIGINS = [
     "null", "http://localhost:8090", "http://127.0.0.1:8090", "http://0.0.0.0:8090",
     "http://192.168.178.75:8090", "http://192.168.178.81:8090",
+    "https://192.168.178.75:9443",  # HTTPS listener (jarvis.console.serve): browsers allow the mic only here
 ]
 _MAX_AUDIO_BYTES = 10 * 1024 * 1024
+_MAX_SPEAK_CHARS = 600
 _CHAT_SYSTEM_PROMPT = (
     "Du bist JARVIS, ein KI-Entwicklungsassistent für WAMOCON. Du hilfst Entwicklern mit Code-Fragen, "
     "Jira-Tickets und technischen Problemen. Antworte kurz und präzise auf Deutsch."
@@ -218,6 +221,8 @@ def _worker(record: RunRecord, config: JarvisConfig) -> None:
         approve=approve,
         run_id=record.run_id,
         tracker=tracker,
+        # Spoken status lines go to the browser as events; the page plays them via /api/speak.
+        narrate=lambda text: record.add_event({"type": "speech", "text": text}),
     )
     duration = (datetime.now(timezone.utc) - started).total_seconds()
 
@@ -376,7 +381,7 @@ async def voice_input(request: Request) -> dict:
     extension = {"audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/mp4": "m4a"}.get(content_type, "webm")
 
     # Imported here: jarvis.steps.voice_input pulls in sounddevice, which the console does not need otherwise.
-    from jarvis.steps.voice_input import extract_ticket_id, transcribe_audio
+    from jarvis.steps.voice_input import extract_ticket_id, parse_yes_no, transcribe_audio
 
     try:
         transcript = await asyncio.to_thread(
@@ -386,7 +391,32 @@ async def voice_input(request: Request) -> dict:
         logger.warning("voice transcription failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Whisper not reachable: {type(exc).__name__}") from exc
     ticket_id = extract_ticket_id(transcript)
-    return {"success": ticket_id is not None, "ticket_id": ticket_id, "transcript": transcript}
+    # answer: True = ja, False = nein, None = unclear or silence (never treated as approval).
+    return {
+        "success": ticket_id is not None,
+        "ticket_id": ticket_id,
+        "transcript": transcript,
+        "answer": parse_yes_no(transcript),
+    }
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=_MAX_SPEAK_CHARS)
+
+
+@app.post("/api/speak")
+async def speak(body: SpeakRequest) -> Response:
+    """Text -> openedai-speech on CAESAR -> WAV for the browser to play."""
+    url = f"{_get_config().voice.tts_url.rstrip('/')}/v1/audio/speech"
+    payload = {"model": "tts-1", "input": body.text, "voice": "alloy", "response_format": "wav"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=5)) as client:
+            response = await client.post(url, json=payload)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("speech synthesis failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Speech service not reachable: {type(exc).__name__}") from exc
+    return Response(content=response.content, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 _chat_primary_down_until = 0.0

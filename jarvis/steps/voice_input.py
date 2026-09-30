@@ -43,7 +43,9 @@ _TENS = {
     "fünfzig": 50, "fifty": 50, "sechzig": 60, "sixty": 60, "siebzig": 70, "seventy": 70,
     "achtzig": 80, "eighty": 80, "neunzig": 90, "ninety": 90,
 }
-_YES = {"ja", "jawohl", "jep", "yes", "yeah", "yep", "okay", "ok", "genehmigt", "fortfahren", "mach", "weiter"}
+# Approval changes code, so only explicit agreement counts; filler words ("ok", "weiter") do not.
+# The "no" side may be broad: it can only reject or make an answer unclear, never approve.
+_YES = {"ja", "jawohl", "yes", "yeah", "yep", "genehmigt", "genehmige"}
 _NO = {"nein", "no", "nope", "reject", "ablehnen", "abgelehnt", "abbrechen", "stopp", "stop", "nicht"}
 
 

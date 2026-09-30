@@ -65,6 +65,15 @@
   .lang-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
   .lang-btn .flag { width: 24px; height: 15px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(255,255,255,.35), 0 0 8px rgba(0,0,0,.6); flex: none; }
 
+  .voice-btn { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: var(--cyan);
+    border: 1px solid var(--cyan); background: rgba(0,25,55,.7); box-shadow: 0 0 16px rgba(0,212,255,.4), inset 0 0 12px rgba(0,212,255,.2); transition: box-shadow .25s, color .25s; }
+  .voice-btn svg { width: 22px; height: 22px; filter: drop-shadow(0 0 5px rgba(0,212,255,.8)); }
+  .voice-btn:hover { box-shadow: 0 0 28px rgba(0,212,255,.7), inset 0 0 16px rgba(0,212,255,.35); }
+  .voice-btn.off { color: var(--muted); border-color: var(--line-2); box-shadow: none; }
+  .voice-btn.off svg { filter: none; }
+  .voice-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  #approvalHeard { margin-top: 14px; }
+
   /* mic button */
   .action-row { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
   .mic { position: relative; width: 66px; height: 66px; border-radius: 50%; flex: none; cursor: pointer; display: grid; place-items: center;
@@ -396,6 +405,10 @@
     <div class="spacer"></div>
     <div class="conn"><span id="dot" class="dot" role="status"></span><span id="conn"></span></div>
     <div class="clock" aria-live="off"><span id="clockTime">--:--:--</span><small id="clockDate"></small></div>
+    <button id="voiceBtn" class="voice-btn" type="button" aria-pressed="true">
+      <svg id="voiceOnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+      <svg id="voiceOffIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" hidden><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg>
+    </button>
     <button id="langBtn" class="lang-btn" type="button">
       <svg class="flag" id="flagDe" viewBox="0 0 5 3" aria-hidden="true"><rect width="5" height="1" fill="#000"/><rect y="1" width="5" height="1" fill="#DD0000"/><rect y="2" width="5" height="1" fill="#FFCE00"/></svg>
       <svg class="flag" id="flagEn" viewBox="0 0 60 30" aria-hidden="true" hidden><clipPath id="uk"><path d="M0 0v30h60V0z"/></clipPath><g clip-path="url(#uk)"><path d="M0 0v30h60V0z" fill="#012169"/><path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30m0-30L0 30" stroke="#C8102E" stroke-width="4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></g></svg>
@@ -483,6 +496,7 @@
       <button id="approveBtn" class="big approve" type="button" data-i18n="approve"></button>
       <button id="rejectBtn" class="big reject" type="button" data-i18n="reject"></button>
     </div>
+    <div id="approvalHeard" class="heard" aria-live="polite"></div>
   </section>
 
   <section id="result" class="panel hud" aria-live="polite"></section>
@@ -585,9 +599,15 @@
       st_done: "fertig", st_failed: "fehlgeschlagen", st_cancelled: "abgebrochen", st_running: "läuft", st_awaiting_approval: "wartet auf Freigabe", dry: "TROCKEN",
       micTitle: "Ticket per Sprache wählen (5 Sekunden)", micRec: "AUFNAHME...", micBusy: "ERKENNE...", heard: "Gehört:",
       heardNoTicket: "keine Ticketnummer erkannt", heardNotOpen: "{t} ist kein offenes JW-Ticket", micDenied: "Mikrofon-Zugriff verweigert.",
-      micInsecure: "Mikrofon nur über HTTPS oder localhost verfügbar – diese Seite läuft über http://{h}.", micFailed: "Spracheingabe fehlgeschlagen: ",
+      micInsecure: "Mikrofon nur über HTTPS: bitte https://192.168.178.75:9443 öffnen (diese Seite läuft über http://{h}).", micFailed: "Spracheingabe fehlgeschlagen: ",
       chatPh: "Frag JARVIS...", send: "Senden", close: "Schließen", chatHello: "Hallo! Frag mich zu Code, Jira-Tickets oder technischen Problemen.",
       chatFailed: "JARVIS ist gerade nicht erreichbar: ",
+      voiceOnTitle: "Sprachausgabe an (klicken zum Ausschalten)", voiceOffTitle: "Sprachausgabe aus (klicken zum Einschalten)",
+      apprListening: "🎤 Höre zu … ({s} Sekunden). Sagen Sie Ja oder Nein.", apprHeardYes: "Gehört: „{h}“ → genehmigt",
+      apprHeardNo: "Gehört: „{h}“ → abgelehnt", apprHeardUnclear: "Gehört: „{h}“ → nicht verstanden",
+      apprUseButtons: "Keine klare Antwort. Bitte mit dem Knopf freigeben oder ablehnen.", apprHighRisk: "Hohes Risiko: Freigabe nur per Knopf, nicht per Sprache.",
+      apprNoMic: "Sprachfreigabe braucht HTTPS: {u}", apprFailed: "Sprachfreigabe nicht möglich ({e}). Bitte Knopf benutzen.",
+      logVoiceYes: "Sprachfreigabe: „{h}“ → genehmigt", logVoiceNo: "Sprachfreigabe: „{h}“ → abgelehnt",
       steps: ["Ticket", "Repo", "Klonen", "Plan", "Freigabe", "Code", "Tests", "Review", "PR", "Info"],
     },
     en: {
@@ -617,9 +637,15 @@
       st_done: "done", st_failed: "failed", st_cancelled: "cancelled", st_running: "running", st_awaiting_approval: "awaiting approval", dry: "DRY",
       micTitle: "Pick a ticket by voice (5 seconds)", micRec: "RECORDING...", micBusy: "RECOGNIZING...", heard: "Heard:",
       heardNoTicket: "no ticket number recognized", heardNotOpen: "{t} is not an open JW ticket", micDenied: "Microphone access denied.",
-      micInsecure: "The microphone only works over HTTPS or localhost – this page is served over http://{h}.", micFailed: "Voice input failed: ",
+      micInsecure: "The microphone needs HTTPS: open https://192.168.178.75:9443 (this page runs on http://{h}).", micFailed: "Voice input failed: ",
       chatPh: "Ask JARVIS...", send: "Send", close: "Close", chatHello: "Hi! Ask me about code, Jira tickets or technical problems.",
       chatFailed: "JARVIS is not reachable right now: ",
+      voiceOnTitle: "Voice output on (click to mute)", voiceOffTitle: "Voice output off (click to unmute)",
+      apprListening: "🎤 Listening … ({s} seconds). Say Ja or Nein.", apprHeardYes: "Heard: “{h}” → approved",
+      apprHeardNo: "Heard: “{h}” → rejected", apprHeardUnclear: "Heard: “{h}” → not understood",
+      apprUseButtons: "No clear answer. Please use the buttons.", apprHighRisk: "High risk: approval by button only, not by voice.",
+      apprNoMic: "Voice approval needs HTTPS: {u}", apprFailed: "Voice approval not possible ({e}). Please use the buttons.",
+      logVoiceYes: "voice approval: “{h}” → approved", logVoiceNo: "voice approval: “{h}” → rejected",
       steps: ["Ticket", "Repo", "Clone", "Plan", "Approval", "Code", "Tests", "Review", "PR", "Notify"],
     },
   };
@@ -651,7 +677,7 @@
     $("langBtn").setAttribute("aria-label", lang === "de" ? "Sprache: Deutsch – auf Englisch wechseln" : "Language: English – switch to German");
     renderDryToggle(); renderPhase(); renderConn(); renderTicketOptions(); renderStepLabels(); renderClock();
     if (lastResult) renderResult(); if (lastRuns) renderHistory();
-    renderMic(); renderHeard(); renderChatEmpty();
+    renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn();
   }
   $("langBtn").addEventListener("click", () => {
     lang = lang === "de" ? "en" : "de";
@@ -872,6 +898,7 @@
   function beginRun(runId, ticket, dryRun) {
     if (currentRun) closeRun();
     currentRun = { id: runId, ticket, dryRun, ws: null, poll: null, seen: 0, finished: false, stateIdx: -1 };
+    speechEpoch++; approvalToken++; stopAudio();
     $("live").classList.add("show");
     typeQueue.length = 0; $("log").replaceChildren();
     $("approval").classList.remove("show"); $("result").className = "panel hud"; $("result").querySelectorAll(":scope > :not(.hc)").forEach((n) => n.remove());
@@ -925,8 +952,12 @@
       log(">>> " + ev.state, "s", ts);
     } else if (ev.type === "note") {
       log(ev.message, "m", ts);
+    } else if (ev.type === "speech") {
+      if (voiceOn) speak(ev.text);
     } else if (ev.type === "approval_required") {
       showPlan(ev.plan); setMood("waiting"); setPhase("awaiting", "awaitingSub"); log(t("logPlanReady"), "s", ts);
+      setApprovalHeard(null);
+      if (voiceOn) voiceApproval(ev.plan, run.id);
     } else if (ev.type === "finished") {
       finish(ev, ts);
     }
@@ -945,7 +976,9 @@
   }
 
   async function decide(approved) {
-    if (!currentRun) return;
+    if (!currentRun || $("approveBtn").disabled) return;   // decided already (button or voice)
+    approvalToken++;
+    if (activeRecorder && activeRecorder.state === "recording") activeRecorder.stop();
     $("approveBtn").disabled = $("rejectBtn").disabled = true;
     try {
       await post("/api/run/" + currentRun.id + "/approval", { approved });
@@ -958,7 +991,7 @@
   $("rejectBtn").addEventListener("click", () => decide(false));
 
   function finish(ev, ts) {
-    const run = currentRun; run.finished = true; closeRun();
+    const run = currentRun; run.finished = true; closeRun(); approvalToken++;
     const r = ev.result || {};
     $("approval").classList.remove("show");
     const nodes = [...$("steps").children];
@@ -1051,33 +1084,111 @@
     else if (!h.open) n.append(document.createTextNode("  —  " + t("heardNotOpen", { t: h.ticket })));
   }
   const setMic = (state) => { micState = state; renderMic(); };
-  $("micBtn").addEventListener("click", async () => {
-    if (micState !== "idle") return;
-    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
-      heardState = { error: "micInsecure", params: { h: location.host || HOST } }; renderHeard(); return;
-    }
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch (_) { heardState = { error: "micDenied" }; renderHeard(); return; }
+  // Shared by the mic button and voice approval.
+  const micAvailable = () => !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+  let activeRecorder = null;
+  async function recordClip(seconds) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });   // throws if the user denies
     const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined), chunks = [];
-    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-    rec.onstop = async () => {
-      stream.getTracks().forEach((tr) => tr.stop());
-      setMic("busy");
-      const blob = new Blob(chunks, { type: rec.mimeType || mime || "audio/webm" });
-      try {
-        const r = await api("/api/voice-input", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
-        const open = Array.isArray(tickets) && tickets.some((tk) => tk.key === r.ticket_id);
-        heardState = { transcript: r.transcript || "", ticket: r.ticket_id, open };
-        if (open) { $("ticketSelect").value = r.ticket_id; updateStart(); }
-      } catch (e) { heardState = { error: "micFailed", extra: e.message }; }
-      renderHeard(); setMic("idle");
-    };
+    activeRecorder = rec;
+    return new Promise((resolve) => {
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach((tr) => tr.stop());
+        activeRecorder = null;
+        resolve(new Blob(chunks, { type: rec.mimeType || mime || "audio/webm" }));
+      };
+      rec.start();
+      setTimeout(() => { if (rec.state === "recording") rec.stop(); }, seconds * 1000);
+    });
+  }
+  const sendAudio = (blob) => api("/api/voice-input", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
+
+  $("micBtn").addEventListener("click", async () => {
+    if (micState !== "idle") return;
+    if (!micAvailable()) { heardState = { error: "micInsecure", params: { h: location.host || HOST } }; renderHeard(); return; }
     heardState = null; renderHeard();
-    rec.start(); setMic("recording");
-    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, MIC_SECONDS * 1000);
+    let blob;
+    try { setMic("recording"); blob = await recordClip(MIC_SECONDS); }
+    catch (_) { heardState = { error: "micDenied" }; renderHeard(); setMic("idle"); return; }
+    setMic("busy");
+    try {
+      const r = await sendAudio(blob);
+      const open = Array.isArray(tickets) && tickets.some((tk) => tk.key === r.ticket_id);
+      heardState = { transcript: r.transcript || "", ticket: r.ticket_id, open };
+      if (open) { $("ticketSelect").value = r.ticket_id; updateStart(); }
+    } catch (e) { heardState = { error: "micFailed", extra: e.message }; }
+    renderHeard(); setMic("idle");
   });
+
+  /* ---------- voice output: lines are played one after another via /api/speak ---------- */
+  let voiceOn = true;
+  try { voiceOn = localStorage.getItem("jarvis.voice") !== "off"; } catch (_) { /* storage blocked */ }
+  let speechChain = Promise.resolve();
+  let speechEpoch = 0;                                    // bumped to drop queued lines (new run, speaker off)
+  function renderVoiceBtn() {
+    $("voiceBtn").setAttribute("aria-pressed", String(voiceOn));
+    $("voiceBtn").classList.toggle("off", !voiceOn);
+    $("voiceOnIcon").hidden = !voiceOn; $("voiceOffIcon").hidden = voiceOn;
+    $("voiceBtn").title = t(voiceOn ? "voiceOnTitle" : "voiceOffTitle");
+    $("voiceBtn").setAttribute("aria-label", t(voiceOn ? "voiceOnTitle" : "voiceOffTitle"));
+  }
+  $("voiceBtn").addEventListener("click", () => {
+    voiceOn = !voiceOn; if (!voiceOn) { speechEpoch++; stopAudio(); }
+    try { localStorage.setItem("jarvis.voice", voiceOn ? "on" : "off"); } catch (_) { /* storage blocked */ }
+    renderVoiceBtn();
+  });
+  let currentAudio = null;
+  function stopAudio() { if (currentAudio) { currentAudio.pause(); currentAudio = null; } }
+  async function playText(text, epoch) {
+    if (!voiceOn || epoch !== speechEpoch) return;
+    try {
+      const res = await fetch(API + "/api/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      if (!res.ok || epoch !== speechEpoch) return;
+      const url = URL.createObjectURL(await res.blob());
+      await new Promise((done) => {
+        const audio = new Audio(url); currentAudio = audio;
+        let guard = setTimeout(done, 30000);                // never let one line block the queue
+        audio.onloadedmetadata = () => { if (isFinite(audio.duration)) { clearTimeout(guard); guard = setTimeout(done, audio.duration * 1000 + 1500); } };
+        audio.onended = audio.onerror = () => { clearTimeout(guard); done(); };
+        audio.play().catch(() => { clearTimeout(guard); done(); });   // autoplay blocked: skip silently
+      });
+      URL.revokeObjectURL(url); currentAudio = null;
+    } catch (_) { /* speech is best effort */ }
+  }
+  // Resolves once this line (and everything queued before it) has been spoken or skipped.
+  function speak(text) { const epoch = speechEpoch; speechChain = speechChain.then(() => playText(text, epoch)); return speechChain; }
+
+  /* ---------- voice approval at AWAIT_APPROVAL ---------- */
+  const APPROVAL_SECONDS = 3;
+  const APPROVAL_TRIES = 2;                               // ask once more when unclear, then leave the buttons
+  let approvalToken = 0;                                  // bumped when a button is clicked or a run ends
+  function setApprovalHeard(key, params, cls) {
+    const n = $("approvalHeard"); n.className = "heard" + (cls ? " " + cls : "");
+    n.textContent = key ? t(key, params) : "";
+  }
+  async function voiceApproval(plan, runId) {
+    const token = ++approvalToken;
+    const alive = () => token === approvalToken && currentRun && currentRun.id === runId && !$("approveBtn").disabled;
+    if (plan.risk_class === "high") { setApprovalHeard("apprHighRisk", null, "err"); speak("Hohes Risiko. Bitte bestätigen Sie mit dem Knopf."); return; }
+    if (!micAvailable()) { setApprovalHeard("apprNoMic", { u: "https://192.168.178.75:9443" }); return; }
+    for (let attempt = 1; attempt <= APPROVAL_TRIES; attempt++) {
+      await speak("Soll ich fortfahren? Sagen Sie Ja oder Nein.");
+      if (!alive()) return;
+      setApprovalHeard("apprListening", { s: APPROVAL_SECONDS });
+      let r;
+      try { r = await sendAudio(await recordClip(APPROVAL_SECONDS)); }
+      catch (e) { if (alive()) setApprovalHeard("apprFailed", { e: e.message || "Mikrofon" }, "err"); return; }
+      if (!alive()) return;
+      const heard = (r.transcript || "").trim() || "…";
+      if (r.answer === true) { setApprovalHeard("apprHeardYes", { h: heard }); log(t("logVoiceYes", { h: heard }), "g"); decide(true); return; }
+      if (r.answer === false) { setApprovalHeard("apprHeardNo", { h: heard }); log(t("logVoiceNo", { h: heard }), "e"); decide(false); return; }
+      setApprovalHeard("apprHeardUnclear", { h: heard }, "err");
+      if (attempt < APPROVAL_TRIES) await speak("Ich habe Sie nicht verstanden.");
+    }
+    if (alive()) { setApprovalHeard("apprUseButtons", null, "err"); speak("Bitte bestätigen Sie mit dem Knopf."); }
+  }
 
   /* ---------- chat with JARVIS (history lives only in this page session) ---------- */
   const chatHistory = [];

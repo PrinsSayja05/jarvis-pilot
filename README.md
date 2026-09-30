@@ -158,10 +158,11 @@ python -m jarvis console             # Web-Konsole auf http://localhost:8090
 - Ticketauswahl, Trockenlauf oder voller Lauf, Freigabe per Klick
 - Live-Fortschritt mit Prozentanzeige, Protokoll mit Zeitstempeln, Ergebnis mit PR-Link
 - Mikrofon-Knopf: fünf Sekunden Aufnahme im Browser, das Ticket wird automatisch gewählt
+- Sprachausgabe (Lautsprecher-Knopf oben rechts) und Freigabe per Sprache: JARVIS fragt „Soll ich fortfahren?“, nimmt drei Sekunden auf und genehmigt nur bei einem klaren „Ja“. Stille oder Unklares führt zu einer zweiten Frage, danach zu den Knöpfen. Pläne mit hohem Risiko nur per Knopf.
 - JARVIS-Chat für Fragen zu Code, Tickets und Technik
 - Deutsch und Englisch umschaltbar, Verlauf der letzten Läufe, Schnellzugriff auf Jira, GitHub, LiteLLM und MinIO
 
-Browser erlauben das Mikrofon nur über HTTPS oder `localhost`. Unter `http://192.168.178.75:8090` braucht der Mikrofon-Knopf deshalb eine HTTPS-Route.
+Browser erlauben das Mikrofon nur über HTTPS oder `localhost`. Auf SOKRATES-1 läuft die Konsole deshalb zusätzlich unter **https://192.168.178.75:9443** mit eigenem Zertifikat. Beim ersten Aufruf zeigt der Browser eine Zertifikatswarnung, die einmal bestätigt werden muss.
 
 | Endpunkt | Zweck |
 |---|---|
@@ -187,7 +188,13 @@ Browser erlauben das Mikrofon nur über HTTPS oder `localhost`. Unter `http://19
 
 ## Deployment auf SOKRATES-1
 
-Die Konsole läuft als systemd-Dienst `jarvis-console` unter dem Benutzer `wamocon`.
+Die Konsole läuft als systemd-Dienst `jarvis-console` unter dem Benutzer `wamocon`. Ein einziger Prozess (`python -m jarvis.console.serve`) bedient HTTP auf Port 8090 und HTTPS auf Port 9443, damit beide Ports dieselben Läufe sehen. Port 8443 ist dort von Vaultwarden belegt.
+
+```bash
+python -m jarvis.console.serve --http-port 8090 --https-port 9443 \n    --ssl-certfile certs/console.crt --ssl-keyfile certs/console.key
+```
+
+Zertifikat und Schlüssel liegen nur auf dem Server unter `certs/` und werden nie committet. Änderungen am Code werden so ausgerollt:
 
 ```bash
 scp console/index.html          wamocon@192.168.178.75:/home/wamocon/jarvis-console/console/
@@ -224,7 +231,7 @@ jarvis.yaml            Modelle, Grenzen, Git-Regeln
 
 ## Bekannte Grenzen
 
-- Ein fest eingestelltes Ziel-Repository (`find_repo` wählt noch nicht je Ticket).
+- Das Ziel-Repository kommt aus dem Ticket-Label `repo:<name>` (zum Beispiel `repo:wmc-rechnungsservice`). Ohne Label nutzt JARVIS `GITHUB_PILOT_REPO`. Alle Repositories müssen in der GitHub App freigegeben sein.
 - Tickets, die neue Abhängigkeiten brauchen, scheitern, weil der Plan `pyproject.toml` nicht ändern darf.
 - Telegram-Antworten „APPROVE“/„REJECT“ werden noch nicht ausgewertet. Freigabe erfolgt im Terminal, per Sprache oder in der Konsole.
 - Die Spracherkennung von Ticketnummern ist bei Zahlen noch unzuverlässig. Ein falsch erkanntes Ticket fällt spätestens bei der Freigabe auf, weil JARVIS den Titel vorliest.

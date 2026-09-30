@@ -6,3 +6,8 @@ __pycache__/
 dist/
 build/
 .jarvis/
+
+# credentials and certificates: never commit
+*.pem
+*.key
+certs/

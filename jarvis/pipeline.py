@@ -22,7 +22,7 @@ from jarvis.progress import ProgressTracker
 from jarvis.state import STATE_LABELS_DE, RunState, StateMachine
 from jarvis.steps.code_change import code_change as generate_code_change
 from jarvis.steps.create_pr import create_pr
-from jarvis.steps.find_repo import find_repo
+from jarvis.steps.find_repo import choose_repo
 from jarvis.steps.jira_comment import jira_comment, jira_failure_comment, jira_plan_comment
 from jarvis.steps.notify import notify, notify_failure, notify_plan
 from jarvis.steps.plan import create_plan
@@ -80,7 +80,9 @@ def execute_run(
         say(f"Ich habe das Ticket {ticket.key} gelesen: {ticket.summary}. Ich erstelle jetzt einen Plan.")
 
         machine.transition(RunState.FIND_REPO)
-        repo_full_name = find_repo(ticket, config)
+        repo_full_name, repo_reason = choose_repo(ticket, config)
+        logger.info("find_repo ticket=%s repo=%s reason=%s", ticket.key, repo_full_name, repo_reason)
+        tracker.note(f"repo: {repo_full_name} ({repo_reason})")
 
         machine.transition(RunState.READ_REPO)
         repo_map = read_repo(repo_full_name, config)
