@@ -1,19 +1,39 @@
-"""GitHub App-authenticated client.
+"""GitHub client: GitHub App, or TEMPORARILY a personal access token.
 
 Rules: PRs are always draft=True. JARVIS never merges - this client has
 no merge() call anywhere, on purpose.
+
+TEMPORARY (WMCNL-2514): the WAMOCON-JARVIS App is not installed on the Wamocon
+organisation yet. Until it is, GITHUB_TOKEN (a personal access token) is used
+directly: no JWT, no installation-token exchange. Remove GITHUB_TOKEN from .env
+once the App is installed, and the App flow below is used again.
 """
 from __future__ import annotations
+
+import logging
 
 from github import Auth, Github, GithubException, GithubIntegration, UnknownObjectException
 
 from jarvis.config import GitHubSettings
 
+logger = logging.getLogger("jarvis.github")
+_mode_logged = False
+
+
+def log_auth_mode(settings: GitHubSettings) -> None:
+    """Log once per process which GitHub auth is active (called at CLI / console startup)."""
+    global _mode_logged
+    if not _mode_logged:
+        logger.info("GitHub auth: %s", settings.auth_mode)
+        _mode_logged = True
+
 
 class GitHubClient:
     def __init__(self, settings: GitHubSettings) -> None:
         self._settings = settings
-        self._token = self._fetch_installation_token()
+        log_auth_mode(settings)
+        # TEMPORARY personal token (WMCNL-2514); otherwise the App's short-lived installation token.
+        self._token = settings.token or self._fetch_installation_token()
         self._github = Github(auth=Auth.Token(self._token))
 
     def _fetch_installation_token(self) -> str:

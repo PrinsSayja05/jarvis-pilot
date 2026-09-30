@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 
+from jarvis.clients.github_client import log_auth_mode
 from jarvis.config import ConfigError, JarvisConfig, load_config
 from jarvis.models.run import RunResult
 from jarvis.progress import ProgressTracker, print_banner
@@ -112,6 +113,7 @@ def run(
     except ConfigError as exc:
         logger.error("Configuration error: %s", exc)
         raise typer.Exit(code=1) from exc
+    log_auth_mode(config.github)
 
     talk = voice or demo
     narrate = (lambda text: speak_async(text, config)) if talk else None

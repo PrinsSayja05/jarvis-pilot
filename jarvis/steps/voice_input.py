@@ -7,7 +7,9 @@ import re
 
 import httpx
 
+from jarvis.clients.jira_client import JiraClient
 from jarvis.config import JarvisConfig
+from jarvis.steps.ticket_speech import guess_ticket, resolve_spoken_ticket
 
 _SAMPLE_RATE = 16000
 TICKET_SECONDS = 5
@@ -20,29 +22,8 @@ _TIMEOUT = httpx.Timeout(60, connect=5)  # fail fast when CAESAR's service is do
 # echoed "JW-9" would start a run nobody asked for.
 _WHISPER_PROMPT = "Projekte JW und WMCNL. Ticketnummer, Ja, Nein."
 _DEFAULT_MIC_DEVICE = "1"
-_DEFAULT_WHISPER_URL ="http://192.168.178.64:8787"
+_DEFAULT_WHISPER_URL = "http://192.168.178.64:8787"
 
-# Known project keys first: Whisper often writes "JW 5", "J W 5" or "JW5" instead of "JW-5".
-# A generic "WORD 5" pattern would turn ordinary speech ("bitte 5") into a ticket key.
-_KNOWN_PROJECTS = ("WMCNL", "JW")
-_KNOWN_PATTERN = re.compile(
-    r"\b(" + "|".join(r"\.?\s?".join(key) for key in _KNOWN_PROJECTS) + r")\.?[\s\-_.:]*(\d+(?:\s+\d+)*)\b"
-)
-_GENERIC_PATTERN = re.compile(r"\b([A-Z][A-Z0-9]{1,9})-(\d{1,7})\b")  # any other project: needs the hyphen
-
-_UNITS = {
-    "null": 0, "zero": 0, "eins": 1, "ein": 1, "eine": 1, "one": 1, "zwei": 2, "zwo": 2, "two": 2,
-    "drei": 3, "three": 3, "vier": 4, "four": 4, "fünf": 5, "fuenf": 5, "five": 5, "sechs": 6, "six": 6,
-    "sieben": 7, "seven": 7, "acht": 8, "eight": 8, "neun": 9, "nine": 9, "zehn": 10, "ten": 10,
-    "elf": 11, "eleven": 11, "zwölf": 12, "twelve": 12, "dreizehn": 13, "thirteen": 13, "vierzehn": 14,
-    "fourteen": 14, "fünfzehn": 15, "fifteen": 15, "sechzehn": 16, "sixteen": 16, "siebzehn": 17,
-    "seventeen": 17, "achtzehn": 18, "eighteen": 18, "neunzehn": 19, "nineteen": 19,
-}
-_TENS = {
-    "zwanzig": 20, "twenty": 20, "dreißig": 30, "dreissig": 30, "thirty": 30, "vierzig": 40, "forty": 40,
-    "fünfzig": 50, "fifty": 50, "sechzig": 60, "sixty": 60, "siebzig": 70, "seventy": 70,
-    "achtzig": 80, "eighty": 80, "neunzig": 90, "ninety": 90,
-}
 # Approval changes code, so only explicit agreement counts; filler words ("ok", "weiter") do not.
 # The "no" side may be broad: it can only reject or make an answer unclear, never approve.
 _YES = {"ja", "jawohl", "yes", "yeah", "yep", "genehmigt", "genehmige"}
@@ -96,38 +77,9 @@ def transcribe_audio(
     return response.json()["text"].strip()
 
 
-def _word_value(word: str) -> int | None:
-    word = word.lower()
-    if word in _UNITS:
-        return _UNITS[word]
-    if word in _TENS:
-        return _TENS[word]
-    for sep in ("und", "-"):  # "einundzwanzig", "twenty-one"
-        head, found, tail = word.partition(sep)
-        if found and sep == "und" and head in _UNITS and tail in _TENS:
-            return _TENS[tail] + _UNITS[head]
-        if found and sep == "-" and head in _TENS and tail in _UNITS:
-            return _TENS[head] + _UNITS[tail]
-    return None
-
-
-def words_to_digits(text: str) -> str:
-    """'JW fünf' -> 'JW 5', 'zwei fünf sechs sechs' -> '2 5 6 6'."""
-    def replace(match: re.Match) -> str:
-        value = _word_value(match.group(0))
-        return str(value) if value is not None else match.group(0)
-
-    return re.sub(r"[A-Za-zÄÖÜäöüß]+(?:-[A-Za-z]+)?", replace, text)
-
-
 def extract_ticket_id(text: str) -> str | None:
-    """'Fix JW-5', 'Bearbeite JW fünf', 'j w 5' or 'WMCNL 2566' -> the ticket key, or None."""
-    upper = words_to_digits(text).upper()
-    match = _KNOWN_PATTERN.search(upper)
-    if match:
-        return f"{re.sub(r'[\s.]', '', match.group(1))}-{re.sub(r'\s', '', match.group(2))}"
-    match = _GENERIC_PATTERN.search(upper)
-    return f"{match.group(1)}-{match.group(2)}" if match else None
+    """Best ticket key in a transcript ("Bearbeite JW achtzehn" -> "JW-18"), not yet checked against Jira."""
+    return guess_ticket(text).candidate
 
 
 def parse_yes_no(text: str) -> bool | None:
@@ -138,14 +90,34 @@ def parse_yes_no(text: str) -> bool | None:
 
 
 def voice_input(config: JarvisConfig | None = None, seconds: float = TICKET_SECONDS) -> str | None:
-    """Record, transcribe, and return the ticket key heard (None if there was none)."""
+    """Record, transcribe, check the ticket against Jira. Unclear: offer the open tickets to type in."""
     print(f"🎤 Listening... ({seconds:g} seconds)")
     transcript = transcribe_audio(record_audio(seconds), config)
     print(f"📝 Heard: {transcript}")
-    ticket_id = extract_ticket_id(transcript)
-    if ticket_id:
-        print(f"🎯 Ticket: {ticket_id}")
-    return ticket_id
+    if config is None:
+        return extract_ticket_id(transcript)
+    result = resolve_spoken_ticket(transcript, JiraClient(config.jira))
+    print(f"   {result.log_line()}")
+    if result.ticket_id:
+        print(f"🎯 Ticket: {result.ticket_id} ({result.summary})")
+        return result.ticket_id
+    if result.say:
+        print(f"❓ {result.say}")
+    return _choose_open_ticket(result.open_tickets)
+
+
+def _choose_open_ticket(open_tickets: list[dict]) -> str | None:
+    if not open_tickets:
+        return None
+    for n, t in enumerate(open_tickets, 1):
+        print(f"   {n:>2}. {t['key']:<8} {t['summary']}")
+    try:
+        answer = input("Nummer oder Ticket (Enter = abbrechen): ").strip().upper()
+    except EOFError:
+        return None
+    if answer.isdigit() and 1 <= int(answer) <= len(open_tickets):
+        return open_tickets[int(answer) - 1]["key"]
+    return answer if any(t["key"] == answer for t in open_tickets) else None
 
 
 def listen_yes_no(config: JarvisConfig | None = None, seconds: float = ANSWER_SECONDS) -> bool | None:

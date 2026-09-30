@@ -90,6 +90,12 @@
   .mic.busy { border-color: var(--cyan); color: var(--cyan); background: radial-gradient(circle, rgba(0,212,255,.25), rgba(0,30,60,.7)); box-shadow: 0 0 20px rgba(0,212,255,.4); }
   .mic.busy .mic-label { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
   @keyframes micpulse { 0% { box-shadow: 0 0 0 0 rgba(255,59,92,.8), 0 0 30px rgba(255,59,92,.8); } 100% { box-shadow: 0 0 0 26px rgba(255,59,92,0), 0 0 30px rgba(255,59,92,.8); } }
+  .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 10px auto 0; max-width: 820px; }
+  .choices[hidden] { display: none; }
+  .choice { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding: 8px 14px; border-radius: 999px;
+    font: 600 14px/1.2 var(--ui); color: var(--text); border: 1px solid var(--line-2); background: rgba(0,25,55,.7); transition: box-shadow .2s, border-color .2s; }
+  .choice b { color: var(--cyan); font-family: var(--display); font-size: 12px; letter-spacing: 1px; margin-right: 4px; }
+  .choice:hover, .choice:focus-visible { border-color: var(--cyan); box-shadow: 0 0 16px rgba(0,212,255,.45); outline: none; }
   .heard { min-height: 22px; font: 600 15px/1.4 var(--ui); color: var(--muted); text-align: center; margin-top: 6px; }
   .heard b { color: var(--cyan); font-family: var(--display); letter-spacing: 1px; text-shadow: 0 0 8px rgba(0,212,255,.5); }
   .heard.err { color: var(--red); }
@@ -476,6 +482,7 @@
       </button>
     </div>
     <div id="heard" class="heard" aria-live="polite"></div>
+    <div id="ticketChoices" class="choices" hidden></div>
     <div id="runMsg" class="msg" aria-live="polite"></div>
   </div>
 
@@ -523,7 +530,7 @@
     <nav class="links">
       <a class="qlink" href="https://wamocon.atlassian.net/jira/software/c/projects/JW/boards/907" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 2 3 11l4 4 5-5 5 5 4-4z"/><path d="m7 15 5 5 5-5"/></svg>JIRA<span class="ext">↗</span></a>
-      <a class="qlink" href="https://github.com/PrinsSayja05/wamocon-test-app" target="_blank" rel="noopener noreferrer">
+      <a id="githubLink" class="qlink" href="https://github.com/" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>GITHUB<span class="ext">↗</span></a>
       <a class="qlink" href="http://192.168.178.75:4000" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>LITELLM<span class="ext">↗</span></a>
@@ -598,7 +605,7 @@
       confirmFull: "Vollständiger Lauf für {t}: Nach Ihrer Freigabe pusht JARVIS einen Branch, öffnet einen Draft-PR und kommentiert das Jira-Ticket. Fortfahren?",
       st_done: "fertig", st_failed: "fehlgeschlagen", st_cancelled: "abgebrochen", st_running: "läuft", st_awaiting_approval: "wartet auf Freigabe", dry: "TROCKEN",
       micTitle: "Ticket per Sprache wählen (5 Sekunden)", micRec: "AUFNAHME...", micBusy: "ERKENNE...", heard: "Gehört:",
-      heardNoTicket: "keine Ticketnummer erkannt", heardNotOpen: "{t} ist kein offenes JW-Ticket", micDenied: "Mikrofon-Zugriff verweigert.",
+      voice_nothing: "keine Ticketnummer erkannt", voice_no_number: "Ich habe {p} gehört, aber keine Nummer. Welches Ticket meinen Sie?", voice_not_found: "{t} gibt es nicht. Welches Ticket meinen Sie?", voice_not_open: "{t} ist nicht mehr offen. Welches Ticket meinen Sie?", logVoicePicked: "Ticket per Klick gewählt: {t}", micDenied: "Mikrofon-Zugriff verweigert.",
       micInsecure: "Mikrofon nur über HTTPS: bitte https://192.168.178.75:9443 öffnen (diese Seite läuft über http://{h}).", micFailed: "Spracheingabe fehlgeschlagen: ",
       chatPh: "Frag JARVIS...", send: "Senden", close: "Schließen", chatHello: "Hallo! Frag mich zu Code, Jira-Tickets oder technischen Problemen.",
       chatFailed: "JARVIS ist gerade nicht erreichbar: ",
@@ -636,7 +643,7 @@
       confirmFull: "Full run for {t}: after you approve the plan, JARVIS pushes a branch, opens a draft PR and comments on the Jira ticket. Continue?",
       st_done: "done", st_failed: "failed", st_cancelled: "cancelled", st_running: "running", st_awaiting_approval: "awaiting approval", dry: "DRY",
       micTitle: "Pick a ticket by voice (5 seconds)", micRec: "RECORDING...", micBusy: "RECOGNIZING...", heard: "Heard:",
-      heardNoTicket: "no ticket number recognized", heardNotOpen: "{t} is not an open JW ticket", micDenied: "Microphone access denied.",
+      voice_nothing: "no ticket number recognized", voice_no_number: "I heard {p} but no number. Which ticket do you mean?", voice_not_found: "{t} does not exist. Which ticket do you mean?", voice_not_open: "{t} is no longer open. Which ticket do you mean?", logVoicePicked: "ticket picked by click: {t}", micDenied: "Microphone access denied.",
       micInsecure: "The microphone needs HTTPS: open https://192.168.178.75:9443 (this page runs on http://{h}).", micFailed: "Voice input failed: ",
       chatPh: "Ask JARVIS...", send: "Send", close: "Close", chatHello: "Hi! Ask me about code, Jira tickets or technical problems.",
       chatFailed: "JARVIS is not reachable right now: ",
@@ -773,8 +780,16 @@
   async function ping() {
     let ok = false;
     try { ok = (await api("/api/health")).status === "ok"; } catch (_) { ok = false; }
-    if (ok && !connected) { loadTickets(); loadHistory(); }
+    if (ok && !connected) { loadTickets(); loadHistory(); loadPublicConfig(); }
     connected = ok; renderConn();
+  }
+
+  // GitHub link follows GITHUB_ORG / GITHUB_PILOT_REPO from the server config.
+  async function loadPublicConfig() {
+    try {
+      const c = await api("/api/config");
+      if (/^[\w.-]+$/.test(c.github_org) && /^[\w.-]+$/.test(c.pilot_repo)) $("githubLink").href = "https://github.com/" + c.github_org + "/" + c.pilot_repo;
+    } catch (_) { /* link keeps pointing at github.com */ }
   }
 
   /* ---------- create ticket ---------- */
@@ -886,11 +901,11 @@
     const box = $("log"), row = el("div"), body = el("span", item.cls + " caret");
     row.append(el("span", "t", "[" + item.ts + "] "), body); box.appendChild(row);
     if (REDUCED) { body.textContent = item.text; body.classList.remove("caret"); box.scrollTop = box.scrollHeight; typeNext(); return; }
-    let i = 0;
+    let i = 0; const chars = Array.from(item.text);
     (function tick() {
-      i = Math.min(item.text.length, i + 1 + Math.floor(typeQueue.length * 1.5) + (item.text.length > 120 ? 2 : 0));
-      body.textContent = item.text.slice(0, i); box.scrollTop = box.scrollHeight;
-      if (i < item.text.length) setTimeout(tick, 14);
+      i = Math.min(chars.length, i + 1 + Math.floor(typeQueue.length * 1.5) + (chars.length > 120 ? 2 : 0));
+      body.textContent = chars.slice(0, i).join(""); box.scrollTop = box.scrollHeight;   // whole characters: never half an emoji
+      if (i < chars.length) setTimeout(tick, 14);
       else { body.classList.remove("caret"); setTimeout(typeNext, 40); }
     })();
   }
@@ -1076,13 +1091,30 @@
     $("micLabel").textContent = micState === "recording" ? t("micRec") : micState === "busy" ? t("micBusy") : "";
   }
   function renderHeard() {
-    const n = $("heard"), h = heardState; n.replaceChildren(); n.className = "heard";
+    const n = $("heard"), box = $("ticketChoices"), h = heardState;
+    n.replaceChildren(); n.className = "heard"; box.replaceChildren(); box.hidden = true;
     if (!h) return;
     if (h.error) { n.classList.add("err"); n.textContent = t(h.error, h.params) + (h.extra || ""); return; }
-    n.append(document.createTextNode(t("heard") + " "), el("b", "", h.ticket || "–"), document.createTextNode("  ·  „" + h.transcript + "“"));
-    if (!h.ticket) n.append(document.createTextNode("  —  " + t("heardNoTicket")));
-    else if (!h.open) n.append(document.createTextNode("  —  " + t("heardNotOpen", { t: h.ticket })));
+    n.append(document.createTextNode(t("heard") + " „" + (h.transcript || "…") + "“  →  "));
+    if (h.status === "found") { n.append(el("b", "", h.ticket), document.createTextNode("  " + (h.summary || ""))); return; }
+    n.classList.add("err");
+    n.append(document.createTextNode(t("voice_" + h.status, { t: h.candidate || "", p: h.project || "JW" })));
+    if (!h.openTickets || !h.openTickets.length || h.status === "nothing") return;
+    box.hidden = false;
+    for (const tk of h.openTickets) {
+      const b = el("button", "choice");
+      b.type = "button"; b.title = tk.summary;
+      b.append(el("b", "", tk.key), document.createTextNode(" " + tk.summary));
+      b.addEventListener("click", () => {
+        if (tickets === null || tickets === "error" || !tickets.some((x) => x.key === tk.key)) loadTickets(tk.key); else { $("ticketSelect").value = tk.key; updateStart(); }
+        voiceLog(t("logVoicePicked", { t: tk.key }), "g");
+        heardState = { transcript: h.transcript, status: "found", ticket: tk.key, summary: tk.summary }; renderHeard();
+      });
+      box.appendChild(b);
+    }
   }
+  // Voice attempts go to the log panel too, even before a run starts.
+  function voiceLog(text, cls) { $("live").classList.add("show"); log(text, cls || "m"); }
   const setMic = (state) => { micState = state; renderMic(); };
   // Shared by the mic button and voice approval.
   const micAvailable = () => !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
@@ -1103,7 +1135,8 @@
       setTimeout(() => { if (rec.state === "recording") rec.stop(); }, seconds * 1000);
     });
   }
-  const sendAudio = (blob) => api("/api/voice-input", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
+  const sendAudio = (blob, purpose) => api("/api/voice-input?purpose=" + (purpose || "ticket"),
+    { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
 
   $("micBtn").addEventListener("click", async () => {
     if (micState !== "idle") return;
@@ -1115,10 +1148,15 @@
     setMic("busy");
     try {
       const r = await sendAudio(blob);
-      const open = Array.isArray(tickets) && tickets.some((tk) => tk.key === r.ticket_id);
-      heardState = { transcript: r.transcript || "", ticket: r.ticket_id, open };
-      if (open) { $("ticketSelect").value = r.ticket_id; updateStart(); }
-    } catch (e) { heardState = { error: "micFailed", extra: e.message }; }
+      heardState = { transcript: r.transcript || "", status: r.status, ticket: r.ticket_id, candidate: r.candidate,
+                     project: r.project, summary: r.summary, openTickets: r.open_tickets || [] };
+      voiceLog("🎤 " + r.log, r.status === "found" ? "g" : "e");
+      if (r.status === "found") {
+        if (tickets === null || tickets === "error" || !tickets.some((tk) => tk.key === r.ticket_id)) loadTickets(r.ticket_id);
+        else { $("ticketSelect").value = r.ticket_id; updateStart(); }
+      }
+      if (r.say && voiceOn) speak(r.say);
+    } catch (e) { heardState = { error: "micFailed", extra: e.message }; voiceLog("🎤 " + t("micFailed") + e.message, "e"); }
     renderHeard(); setMic("idle");
   });
 
@@ -1178,7 +1216,7 @@
       if (!alive()) return;
       setApprovalHeard("apprListening", { s: APPROVAL_SECONDS });
       let r;
-      try { r = await sendAudio(await recordClip(APPROVAL_SECONDS)); }
+      try { r = await sendAudio(await recordClip(APPROVAL_SECONDS), "answer"); }
       catch (e) { if (alive()) setApprovalHeard("apprFailed", { e: e.message || "Mikrofon" }, "err"); return; }
       if (!alive()) return;
       const heard = (r.transcript || "").trim() || "…";

@@ -6,7 +6,7 @@ hardcoded here or in jarvis.yaml.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -62,6 +62,13 @@ class GitHubSettings:
     private_key_path: str
     org: str
     pilot_repo: str
+    # TEMPORARY (WMCNL-2514): personal access token until the GitHub App is installed on Wamocon.
+    # When set, it replaces the App flow completely.
+    token: str = field(default="", repr=False)
+
+    @property
+    def auth_mode(self) -> str:
+        return "personal token (temporary)" if self.token else "GitHub App"
 
 
 @dataclass
@@ -117,6 +124,19 @@ def _env_default(name: str, default: str) -> str:
     return os.environ.get(name) or default
 
 
+def _github_settings() -> GitHubSettings:
+    """GITHUB_TOKEN set: personal token (temporary, WMCNL-2514), the App variables are not needed.
+    Otherwise the GitHub App: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH are required."""
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    return GitHubSettings(
+        app_id=os.environ.get("GITHUB_APP_ID", "") if token else _require_env("GITHUB_APP_ID"),
+        private_key_path=os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "") if token else _require_env("GITHUB_APP_PRIVATE_KEY_PATH"),
+        org=_require_env("GITHUB_ORG"),
+        pilot_repo=_require_env("GITHUB_PILOT_REPO"),
+        token=token,
+    )
+
+
 def load_config(path: str | Path = "jarvis.yaml") -> JarvisConfig:
     load_dotenv()
 
@@ -142,12 +162,7 @@ def load_config(path: str | Path = "jarvis.yaml") -> JarvisConfig:
             email=_require_env("JIRA_EMAIL"),
             api_token=jira_api_token,
         ),
-        github=GitHubSettings(
-            app_id=_require_env("GITHUB_APP_ID"),
-            private_key_path=_require_env("GITHUB_APP_PRIVATE_KEY_PATH"),
-            org=_require_env("GITHUB_ORG"),
-            pilot_repo=_require_env("GITHUB_PILOT_REPO"),
-        ),
+        github=_github_settings(),
         litellm=LiteLLMSettings(
             base_url=_require_env("LITELLM_BASE_URL"),
             api_key=_require_env("JARVIS_API_KEY"),

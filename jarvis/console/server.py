@@ -160,6 +160,16 @@ def _save_history() -> None:
 _load_history()
 
 
+@app.on_event("startup")
+def _log_github_auth() -> None:
+    try:
+        from jarvis.clients.github_client import log_auth_mode
+
+        log_auth_mode(_get_config().github)
+    except Exception as exc:  # a config problem shows up on the first request anyway
+        logger.warning("GitHub auth: not determined at startup (%s)", exc)
+
+
 def _plan_view(plan: Plan) -> dict:
     return {
         "approach": plan.approach,
@@ -295,6 +305,13 @@ def index() -> FileResponse:
     return FileResponse(_INDEX_HTML, media_type="text/html")
 
 
+@app.get("/api/config")
+def public_config() -> dict:
+    """Non-secret settings the page needs (e.g. the GitHub link). Never tokens or keys."""
+    github = _get_config().github
+    return {"github_org": github.org, "pilot_repo": github.pilot_repo, "github_auth": github.auth_mode}
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -370,8 +387,12 @@ def decide(run_id: str, body: ApprovalRequest) -> dict:
 
 
 @app.post("/api/voice-input")
-async def voice_input(request: Request) -> dict:
-    """Raw audio body (webm/ogg/wav from the browser's MediaRecorder) -> Whisper -> ticket key."""
+async def voice_input(request: Request, purpose: Literal["ticket", "answer"] = "ticket") -> dict:
+    """Raw audio body (webm/ogg/wav from the browser's MediaRecorder) -> Whisper.
+
+    purpose=ticket: find the ticket and check it against Jira (status found / not_open / not_found /
+    no_number / nothing, plus the open tickets to offer). purpose=answer: only ja/nein, no Jira call.
+    """
     audio = await request.body()
     if not audio:
         raise HTTPException(status_code=422, detail="empty audio")
@@ -380,24 +401,39 @@ async def voice_input(request: Request) -> dict:
     content_type = request.headers.get("content-type", "audio/webm").split(";")[0].strip()
     extension = {"audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/mp4": "m4a"}.get(content_type, "webm")
 
-    # Imported here: jarvis.steps.voice_input pulls in sounddevice, which the console does not need otherwise.
-    from jarvis.steps.voice_input import extract_ticket_id, parse_yes_no, transcribe_audio
+    # Imported here: jarvis.steps.voice_input pulls in the audio stack, which the console does not need otherwise.
+    from jarvis.steps.voice_input import parse_yes_no, transcribe_audio
 
+    config = _get_config()
     try:
         transcript = await asyncio.to_thread(
-            transcribe_audio, audio, _get_config(), filename=f"audio.{extension}", content_type=content_type
+            transcribe_audio, audio, config, filename=f"audio.{extension}", content_type=content_type
         )
     except Exception as exc:
         logger.warning("voice transcription failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Whisper not reachable: {type(exc).__name__}") from exc
-    ticket_id = extract_ticket_id(transcript)
+
     # answer: True = ja, False = nein, None = unclear or silence (never treated as approval).
-    return {
-        "success": ticket_id is not None,
-        "ticket_id": ticket_id,
-        "transcript": transcript,
-        "answer": parse_yes_no(transcript),
-    }
+    body: dict[str, Any] = {"transcript": transcript, "answer": parse_yes_no(transcript)}
+    if purpose == "answer":
+        logger.info("voice answer: heard=%r answer=%s", transcript, body["answer"])
+        return body
+
+    from jarvis.steps.ticket_speech import resolve_spoken_ticket
+
+    result = await asyncio.to_thread(resolve_spoken_ticket, transcript, JiraClient(config.jira))
+    body.update(
+        success=result.ticket_id is not None,
+        ticket_id=result.ticket_id,
+        status=result.status,
+        project=result.project,
+        candidate=result.candidate,
+        summary=result.summary,
+        say=result.say,
+        open_tickets=result.open_tickets,
+        log=result.log_line(),
+    )
+    return body
 
 
 class SpeakRequest(BaseModel):

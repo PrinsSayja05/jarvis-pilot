@@ -107,7 +107,7 @@ flowchart TB
 Voraussetzungen: Python 3.11 oder neuer, Docker, Zugriff auf das WAMOCON-Netz.
 
 ```bash
-git clone https://github.com/PrinsSayja05/jarvis-pilot.git
+git clone https://github.com/Wamocon/jarvis-pilot.git
 cd jarvis-pilot
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
@@ -127,7 +127,8 @@ Für Sprachein- und -ausgabe am Rechner wird zusätzlich die PortAudio-Bibliothe
 |---|---|
 | `JARVIS_API_KEY`, `LITELLM_BASE_URL` | Zugang zum LiteLLM-Gateway |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | GitHub App WAMOCON-JARVIS |
-| `GITHUB_ORG`, `GITHUB_PILOT_REPO` | Ziel-Repository des Piloten |
+| `GITHUB_ORG`, `GITHUB_PILOT_REPO` | Organisation und Standard-Repository (`Wamocon`, `wamocon-test-app01`) |
+| `GITHUB_TOKEN` | **Vorübergehend:** persönlicher Zugriffstoken, solange die GitHub App nicht in der Organisation Wamocon installiert ist (WMCNL-2514). Ist er gesetzt, wird die App nicht benutzt. Nach der Installation der App wieder entfernen |
 | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` | Jira Cloud |
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Artefakt-Ablage |
 | `WHISPER_URL`, `SPEECH_URL` | Sprachdienste auf CAESAR (alte Namen `STT_URL`, `TTS_URL` gelten weiter) |

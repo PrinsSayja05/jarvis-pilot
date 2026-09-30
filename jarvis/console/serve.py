@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 
 import uvicorn
 
@@ -47,6 +48,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.https_port and not (args.ssl_certfile and args.ssl_keyfile):
         parser.error("--https-port needs --ssl-certfile and --ssl-keyfile")
+    # JARVIS' own INFO lines (repo choice, voice attempts, Jira status) into the journal; uvicorn keeps its own format.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     asyncio.run(_serve(args))
 
 
