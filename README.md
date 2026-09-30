@@ -226,15 +226,17 @@ jarvis.yaml            Modelle, Grenzen, Git-Regeln
 
 ## Sicherheit
 
+- **GitHub-Zugang von JARVIS mit Schutzregel für main** ist eine zusammenhängende Sicherheitsmaßnahme, kein getrenntes Thema. JARVIS bekommt nur so viel Zugriff, wie es zum Pushen eines Branches `jarvis/<ticket>` und zum Öffnen eines Draft Pull Requests braucht, und `main` ist durch eine Schutzregel geschützt. So kann kein Lauf an einem Menschen vorbei in `main` schreiben. Beschrieben in 06_JARVIS_Sicherheit.docx. Offen: die Schutzregel lässt sich im aktuellen GitHub-Plan für private Repositories noch nicht setzen (WMCNL-2593), bis dahin trägt allein `auto_merge: false` und die Pflicht zum Draft PR.
 - `.env` ist in `.gitignore`. Zugangsdaten gehören nur dorthin, nie in `.env.example` oder den Code.
-- Die Web-Konsole nimmt nur Anfragen von ihrer eigenen Seite an (Origin-Prüfung). **Einen Login gibt es noch nicht** (WMCNL-2533): Wer im lokalen Netz die Seite öffnen kann, kann Läufe starten und freigeben.
+- Die Web-Konsole nimmt nur Anfragen von ihrer eigenen Seite an (Origin-Prüfung). **Einen Login gibt es noch nicht** (WMCNL-2533): Wer im lokalen Netz die Seite öffnen kann, kann Läufe starten und freigeben. Das gilt auch für die CEO-Ansicht `/ceo`: der Link im Kopf der Konsole erscheint nur für Konten aus `.jarvis/admins.json`, das steuert aber nur die Anzeige, nicht den Zugriff.
+- Freigaben aus Telegram sind an eine Person gebunden: `.jarvis/telegram_users.json` ordnet ein Telegram-Konto einem Jira-Konto zu, und nur die zuständige Person darf entscheiden. Pläne mit hohem Risiko lassen sich dort nicht per Tastendruck freigeben, sondern nur in der Konsole.
 - Modellausgaben im Chat werden vor der Anzeige maskiert und nie als HTML ausgeführt.
 
 ## Bekannte Grenzen
 
 - Das Ziel-Repository kommt aus dem Ticket-Label `repo:<name>` (zum Beispiel `repo:wmc-rechnungsservice`). Ohne Label nutzt JARVIS `GITHUB_PILOT_REPO`. Alle Repositories müssen in der GitHub App freigegeben sein.
 - Tickets, die neue Abhängigkeiten brauchen, scheitern, weil der Plan `pyproject.toml` nicht ändern darf.
-- Telegram-Antworten „APPROVE“/„REJECT“ werden noch nicht ausgewertet. Freigabe erfolgt im Terminal, per Sprache oder in der Konsole.
+- Freigabe erfolgt in der Konsole, im Terminal, per Sprache oder über die Schaltflächen in Telegram. Wer aus Telegram entscheiden will, muss in `.jarvis/telegram_users.json` eingetragen sein. Der Bot verträgt nur einen Abholer: läuft irgendwo eine zweite JARVIS-Konsole mit demselben Token, bekommt keiner von beiden die Tastendrücke.
 - Die Spracherkennung von Ticketnummern ist bei Zahlen noch unzuverlässig. Ein falsch erkanntes Ticket fällt spätestens bei der Freigabe auf, weil JARVIS den Titel vorliest.
 - Das Modell `jarvis-general` antwortet derzeit nicht. Der Chat nutzt deshalb `sokrates-fast`.
 
