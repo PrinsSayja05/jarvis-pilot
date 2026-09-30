@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import logging
 from pathlib import Path
 
 from jarvis.clients.litellm_client import LiteLLMClient
@@ -10,8 +11,11 @@ from jarvis.config import JarvisConfig
 from jarvis.models.code_change import CodeChange
 from jarvis.models.plan import Plan
 from jarvis.models.ticket import JiraTicket
+from jarvis.steps.code_style import tidy_changed_files, unified_diff
 from jarvis.steps.diff_quality import DiffQualityChecker, DiffQualityError
 from jarvis.steps.read_repo import RepoMap
+
+logger = logging.getLogger("jarvis.code_change")
 
 _SYSTEM_PROMPT = "Du bist ein Coding-Agent. Antworte NUR mit einem unified diff. Kein Text davor oder danach."
 
@@ -58,13 +62,16 @@ def code_change(
         report = checker.check(result.content, read_original)
         missing = check_missing_imports(report.files, repo_map, read_original) if report.ok else []
         if report.ok and not missing:
+            tidied, style_notes = tidy_changed_files(report.files, read_original)
+            for note in style_notes:
+                logger.info("code style: %s", note)
             files = {
                 path: _restore_style(text, *_read_original(repo_map.local_path, path)[1:])
-                for path, text in report.files.items()
+                for path, text in tidied.items()
             }
             return CodeChange(
                 files=files,
-                diff=report.diff,
+                diff=unified_diff(tidied, read_original) if style_notes else report.diff,
                 files_changed=report.files_changed,
                 tokens_used=tokens_used,
                 latency_seconds=latency,

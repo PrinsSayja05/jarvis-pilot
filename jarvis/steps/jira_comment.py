@@ -1,9 +1,13 @@
-"""Post a PR summary comment on the Jira ticket and advance its status.
+"""Post a PR summary comment on the Jira ticket and move it to its review status.
 
-The status move (e.g. -> "In Review") covers WMCNL-2553 without needing a
-separate module - it is just another Jira REST call alongside the comment.
+The status move (e.g. -> "Review/Test") covers WMCNL-2553. Projects without a review
+status (JW) are logged and skipped; the run does not fail.
 """
 from __future__ import annotations
+
+import logging
+
+import httpx
 
 from jarvis.clients.jira_client import JiraClient
 from jarvis.config import JarvisConfig
@@ -13,6 +17,8 @@ from jarvis.models.review import ReviewResult
 from jarvis.models.test_result import TestResult
 from jarvis.models.ticket import JiraTicket
 from jarvis.steps.notify import build_plan_message
+
+logger = logging.getLogger("jarvis.jira_comment")
 
 
 def jira_comment(
@@ -33,7 +39,10 @@ def jira_comment(
         f"Run-ID: {run_id}"
     )
     client.add_comment(ticket.key, text)
-    client.transition_to_next(ticket.key)
+    try:  # the PR and the comment exist; a status change must never fail the run
+        client.transition_to_review(ticket.key)
+    except httpx.HTTPError as exc:
+        logger.warning("jira status %s: could not move to review: %s", ticket.key, exc)
 
 
 def jira_plan_comment(ticket: JiraTicket, plan: Plan, run_id: str, config: JarvisConfig) -> None:

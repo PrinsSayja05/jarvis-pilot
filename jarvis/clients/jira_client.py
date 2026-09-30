@@ -1,12 +1,15 @@
 """Jira REST API client."""
 from __future__ import annotations
 
+import logging
 import re
 
 import httpx
 
 from jarvis.config import JiraSettings
 from jarvis.models.ticket import JiraTicket, TicketComment
+
+logger = logging.getLogger("jarvis.jira")
 
 # Acceptance criteria are custom fields whose ids differ per Jira site; match them by name.
 _ACCEPTANCE_FIELD_NAMES = ("acceptance criteria", "akzeptanzkriterien")
@@ -134,17 +137,56 @@ class JiraClient:
             )
         response.raise_for_status()
 
-    def transition_to_next(self, issue_key: str) -> None:
-        """Move the issue to the next workflow status (e.g. after opening a PR)."""
+    def transition_to_review(self, issue_key: str) -> str | None:
+        """After a PR: move the issue to its review status. Returns the new status, or None if skipped.
+
+        Workflows differ per project (WMCNL has "Review/Test", JW has no review status at all),
+        so the target is matched by name. Never moves an issue that is already done.
+        """
         transitions_url = f"{self._base_url}/rest/api/3/issue/{issue_key}/transitions"
         with httpx.Client(auth=self._auth, timeout=30) as client:
+            issue = client.get(f"{self._base_url}/rest/api/3/issue/{issue_key}", params={"fields": "status"})
+            issue.raise_for_status()
+            status = issue.json()["fields"]["status"]
             response = client.get(transitions_url)
             response.raise_for_status()
             transitions = response.json()["transitions"]
-            if not transitions:
-                return
-            next_transition = transitions[0]
-            client.post(transitions_url, json={"transition": {"id": next_transition["id"]}})
+
+            if status.get("statusCategory", {}).get("key") == "done":
+                logger.info("jira status %s: already done (%s), not moved", issue_key, status["name"])
+                return None
+            chosen = pick_review_transition(transitions)
+            if chosen is None:
+                logger.warning(
+                    "jira status %s: no review status in this workflow, staying in %r. Available transitions: %s",
+                    issue_key, status["name"], ", ".join(f"{t['name']} -> {t['to']['name']}" for t in transitions),
+                )
+                return None
+            if chosen["to"]["name"].casefold() == status["name"].casefold():
+                return None
+            client.post(transitions_url, json={"transition": {"id": chosen["id"]}}).raise_for_status()
+            logger.info("jira status %s: %s -> %s", issue_key, status["name"], chosen["to"]["name"])
+            return chosen["to"]["name"]
+
+
+# Best match first: exact review statuses, then anything that reads like review.
+_REVIEW_EXACT = ("in review", "in prüfung", "review", "review/test", "code review")
+_REVIEW_PARTS = ("review", "prüfung", "pruefung")
+
+
+def pick_review_transition(transitions: list[dict]) -> dict | None:
+    """The transition whose target status is the review status, matched by the target's name."""
+    def target(t: dict) -> str:
+        return t.get("to", {}).get("name", "").strip().casefold()
+
+    for wanted in _REVIEW_EXACT:
+        for t in transitions:
+            if target(t) == wanted:
+                return t
+    for t in transitions:
+        if any(part in target(t) for part in _REVIEW_PARTS):
+            return t
+    return None
 
 
 def _extract_description(description_field: dict | str | None) -> str:
