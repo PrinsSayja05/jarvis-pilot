@@ -80,9 +80,11 @@ def execute_run(
 
     repo_map = None
     marked = None  # ticket key carrying the jarvis-in-progress label, removed in `finally`
+    who = ("", "")  # (assignee name, ticket URL) for the failure message; empty until the ticket is read
     try:
         machine.transition(RunState.READ_TICKET)
         ticket = read_ticket(ticket_id, config)
+        who = (ticket.assignee_name, ticket.url)
         logger.info("ticket %s priority=%s", ticket.key, ticket.priority or "-")
         tracker.note(f"Priorität: {priority_label(ticket.priority) or 'nicht gesetzt'}")
         say(f"Ich habe das Ticket {ticket.key} gelesen: {ticket.summary}. Ich erstelle jetzt einen Plan.")
@@ -136,7 +138,8 @@ def execute_run(
         else:
             logger.exception("Run failed")
         # Only a full run that was approved may write to Jira; dry runs never do.
-        _report_failure(ticket_id, exc, run_id, config, tracker, comment_on_jira=result.approved and not dry_run)
+        _report_failure(ticket_id, exc, run_id, config, tracker, who,
+                        comment_on_jira=result.approved and not dry_run)
     finally:
         result.state = machine.state
         result.ended_at = datetime.now(timezone.utc).isoformat()
@@ -187,7 +190,7 @@ def _announce_plan(ticket, plan, run_id, config, tracker, *, post_to_jira: bool)
             logger.exception("could not post the plan comment on %s", ticket.key)
 
 
-def _report_failure(ticket_id, exc, run_id, config, tracker, *, comment_on_jira: bool) -> None:
+def _report_failure(ticket_id, exc, run_id, config, tracker, who=("", ""), *, comment_on_jira: bool) -> None:
     """Best effort: reporting a failure must never raise out of the run boundary."""
     if comment_on_jira:
         try:
@@ -196,7 +199,7 @@ def _report_failure(ticket_id, exc, run_id, config, tracker, *, comment_on_jira:
         except Exception:
             logger.exception("could not post the failure comment on %s", ticket_id)
     try:
-        notify_failure(ticket_id, str(exc), config)
+        notify_failure(ticket_id, str(exc), config, assignee_name=who[0], ticket_url=who[1])
     except Exception:
         logger.exception("could not send the failure notification")
 
@@ -311,7 +314,8 @@ def _code_test_review_pr(
     machine.transition(RunState.NOTIFY)
     repairs = result.repair_result.attempts if result.repair_result else 0
     jira_comment(ticket, pr_result, test_result, review_result, run_id, config, repairs=repairs)
-    notify(ticket, pr_result, test_result, review_result, config, repairs=repairs)
+    notify(ticket, pr_result, test_result, review_result, config, repairs=repairs,
+           duration_seconds=tracker.elapsed_seconds())
 
 
 class RunQueue:

@@ -35,9 +35,39 @@ from jarvis.models.ticket import JiraTicket
 
 logger = logging.getLogger("jarvis.notify")
 
+NOT_ASSIGNED = "nicht zugewiesen"
+# Where a human goes to act on the message. CONSOLE_URL overrides it per installation.
+CONSOLE_URL = os.getenv("CONSOLE_URL", "https://192.168.178.75:9443")
+_MAX_APPROACH_SENTENCES = 2
+_MAX_APPROACH_CHARS = 240
+_MAX_FILES_SHOWN = 4
+_MAX_JUDGE_CHARS = 160
 _MAX_ERROR_CHARS = 500
 EXPECTED_RUN_DURATION = "~60s"
 _RISK_DE = {"low": "niedrig", "medium": "mittel", "high": "hoch"}
+
+
+def _for_line(assignee_name: str) -> str:
+    """Second line of every message: who the ticket belongs to. Never blank, never fails."""
+    return f"👤 Für: {(assignee_name or '').strip() or NOT_ASSIGNED}"
+
+
+def _short_approach(text: str) -> str:
+    """At most two sentences, so the plan still reads at a glance on a phone."""
+    text = " ".join((text or "").split())
+    short = " ".join(re.split(r"(?<=[.!?])\s+", text)[:_MAX_APPROACH_SENTENCES]).strip()
+    if len(short) > _MAX_APPROACH_CHARS:
+        short = short[:_MAX_APPROACH_CHARS].rsplit(" ", 1)[0] + " …"
+    return short or "—"
+
+
+def _clip_findings(findings: str, passed: bool) -> str:
+    text = " ".join((findings or "").split())
+    if not text:
+        return "keine Einwände" if passed else "—"
+    if len(text) > _MAX_JUDGE_CHARS:
+        text = text[:_MAX_JUDGE_CHARS].rsplit(" ", 1)[0] + " …"
+    return text
 
 
 def _batch_seconds() -> float:
@@ -59,6 +89,9 @@ class DoneItem:
     url: str          # Jira browse URL
     pr_url: str
     passed_count: int
+    total_tests: int
+    duration_seconds: float
+    judge_summary: str
     repairs: int
     judge_warning: bool
     assignee_id: str
@@ -78,14 +111,31 @@ class DoneItem:
         return f"{self.key} ({', '.join(extras)})"
 
 
+def build_result_message(item: DoneItem) -> str:
+    """One finished run. The first two lines carry the whole story in a notification preview."""
+    tests = f"{item.passed_count}/{item.total_tests} bestanden" if item.total_tests else f"{item.passed_count} bestanden"
+    if item.repairs:
+        tests += f" (nach {item.repairs} Reparatur" + ("en)" if item.repairs > 1 else ")")
+    return "\n".join([
+        f"✅ JARVIS fertig — {item.key}",
+        _for_line(item.assignee_name),
+        f"🔗 PR: {item.pr_url}",
+        f"✅ Tests: {tests}",
+        f"🔍 Review: {item.judge_summary or 'keine Einwände'}",
+        f"⏱️ Dauer: {item.duration_seconds:.0f}s",
+    ])
+
+
 def build_batch_message(items: list[DoneItem]) -> str:
+    """One run gets the full result message; several runs of one person get a combined one."""
     if len(items) == 1:
-        head = f"✅ JARVIS: 1 Ticket fertig: {items[0].short()}"
-    else:
-        head = f"✅ JARVIS: {len(items)} Tickets fertig: " + ", ".join(i.short() for i in items)
-    lines = [head, ""]
+        return build_result_message(items[0])
+    lines = [f"✅ JARVIS fertig — {len(items)} Tickets", _for_line(items[0].assignee_name), ""]
     for i in items:
-        lines.append(f"🔗 {i.key}: {i.pr_url}  ({i.passed_count} Tests bestanden)")
+        extras = (f" ({i.repairs} Reparatur" + ("en)" if i.repairs > 1 else ")")) if i.repairs else ""
+        warn = "  ⚠️ Judge-Warnung" if i.judge_warning else ""
+        lines.append(f"🔗 {i.key} · PR {i.pr_number}{extras}{warn}")
+        lines.append(f"    {i.pr_url}")
     return "\n".join(lines)
 
 
@@ -181,6 +231,7 @@ def notify(
     config: JarvisConfig,
     *,
     repairs: int = 0,
+    duration_seconds: float = 0.0,
 ) -> None:
     """Queue a finished run; it is sent together with other runs of the same assignee."""
     _batcher.add(
@@ -190,6 +241,9 @@ def notify(
             url=ticket.url,
             pr_url=pr_result.url,
             passed_count=test_result.passed_count,
+            total_tests=test_result.passed_count + test_result.failed + test_result.errors,
+            duration_seconds=duration_seconds,
+            judge_summary=_clip_findings(review_result.findings, review_result.passed),
             repairs=repairs,
             judge_warning=not review_result.passed,
             assignee_id=ticket.assignee_id,
@@ -203,32 +257,46 @@ def notify(
 
 def build_plan_message(ticket: JiraTicket, plan: Plan) -> str:
     """The plan as shown to the developer before approval (Telegram and the Jira comment)."""
-    files = ", ".join(fc.path for fc in plan.files_to_change) or "keine"
-    tests = "; ".join(plan.test_plan) or "keine"
-    return (
-        f"🧭 JARVIS Plan: {ticket.key}\n"
-        f"📋 {ticket.summary}\n"
-        "\n"
-        f"Ansatz: {plan.approach}\n"
-        f"Dateien: {files}\n"
-        f"✅ Geplante Tests: {tests}\n"
-        f"Risiko: {_RISK_DE.get(plan.risk_class, plan.risk_class)} ({plan.risk_class})\n"
-        f"Dauer: {EXPECTED_RUN_DURATION}\n"
-        "\n"
-        "Freigabe in der JARVIS-Konsole: APPROVE oder REJECT"
-    )
+    paths = [fc.path for fc in plan.files_to_change]
+    shown = ", ".join(paths[:_MAX_FILES_SHOWN]) or "keine"
+    if len(paths) > _MAX_FILES_SHOWN:
+        shown += f" (+{len(paths) - _MAX_FILES_SHOWN} weitere)"
+    return "\n".join([
+        f"🧭 JARVIS Plan — {ticket.key}",
+        _for_line(ticket.assignee_name),
+        f"📋 {ticket.summary}",
+        "",
+        f"Ansatz: {_short_approach(plan.approach)}",
+        "",
+        f"📁 Dateien: {shown}",
+        f"⚠️ Risiko: {_RISK_DE.get(plan.risk_class, plan.risk_class)} ({plan.risk_class})",
+        f"⏱️ Geschätzte Dauer: {EXPECTED_RUN_DURATION}",
+        "",
+        f"👉 Freigabe in der Konsole: {CONSOLE_URL}",
+    ])
 
 
 def notify_plan(ticket: JiraTicket, plan: Plan, config: JarvisConfig) -> None:
     _send(build_plan_message(ticket, plan), config.telegram.bot_token, config.telegram.engineer_chat_id)
 
 
-def notify_failure(ticket_id: str, error: str, config: JarvisConfig) -> None:
-    """Tell the developer a run ended in FAILED, with the reason. Never batched."""
+def build_failure_message(ticket_id: str, error: str, assignee_name: str = "", ticket_url: str = "") -> str:
+    error = " ".join((error or "").split())
     if len(error) > _MAX_ERROR_CHARS:
         error = error[:_MAX_ERROR_CHARS] + "…"
-    text = f"❌ JARVIS FAILED: {ticket_id}\nGrund: {error}\nManueller Eingriff nötig."
-    _send(text, config.telegram.bot_token, config.telegram.engineer_chat_id)
+    return "\n".join([
+        f"❌ JARVIS fehlgeschlagen — {ticket_id}",
+        _for_line(assignee_name),
+        f"Grund: {error}",
+        f"👉 Manueller Eingriff nötig: {ticket_url or CONSOLE_URL}",
+    ])
+
+
+def notify_failure(ticket_id: str, error: str, config: JarvisConfig, *,
+                   assignee_name: str = "", ticket_url: str = "") -> None:
+    """Tell the developer a run ended in FAILED, with the reason. Never batched."""
+    _send(build_failure_message(ticket_id, error, assignee_name, ticket_url),
+          config.telegram.bot_token, config.telegram.engineer_chat_id)
 
 
 def _send(text: str, bot_token: str, chat_id: str) -> None:

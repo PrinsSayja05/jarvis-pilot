@@ -9,13 +9,20 @@ import logging
 import time
 from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 
 from jarvis.config import LiteLLMSettings
 
 logger = logging.getLogger("jarvis.litellm")
 
 REQUEST_TIMEOUT_SECONDS = 180.0
+
+# A streamed answer sometimes dies mid-flight with "connection forcibly closed" while the model
+# keeps generating on the node: the backend is fine, the HTTP connection to the gateway is not.
+# Seen roughly once in 20 runs from a workstation on the LAN, never yet on SOKRATES-1 itself.
+# One fresh attempt costs about as much as the first one and turns a FAILED run into a normal one.
+# Timeouts are NOT retried: those already waited the full REQUEST_TIMEOUT_SECONDS.
+_CONNECTION_RETRIES = 1
 
 
 @dataclass
@@ -51,7 +58,7 @@ class LiteLLMClient:
         """
         start = time.monotonic()
         if stream:
-            content, prompt_tokens, completion_tokens = self._complete_streamed(
+            content, prompt_tokens, completion_tokens = self._streamed_with_retry(
                 model_alias, messages, temperature, response_format
             )
         else:
@@ -81,6 +88,27 @@ class LiteLLMClient:
             completion_tokens=completion_tokens,
             latency_seconds=latency,
         )
+
+    def _streamed_with_retry(
+        self,
+        model_alias: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict | None,
+    ) -> tuple[str, int, int]:
+        for attempt in range(_CONNECTION_RETRIES + 1):
+            try:
+                return self._complete_streamed(model_alias, messages, temperature, response_format)
+            except APITimeoutError:
+                raise
+            except APIConnectionError as exc:
+                if attempt == _CONNECTION_RETRIES:
+                    raise
+                logger.warning(
+                    "model_call model=%s: stream broke (%s: %s), retrying once",
+                    model_alias, type(exc.__cause__ or exc).__name__, str(exc.__cause__ or exc)[:120],
+                )
+        raise AssertionError("unreachable")
 
     def _complete_streamed(
         self,
