@@ -29,3 +29,5 @@ class RunResult:
     started_at: str = ""
     ended_at: str = ""
     error: Optional[str] = None
+    dry_run: bool = False
+    self_rating: Optional[dict] = None   # {"score": 1-10, "reasoning": str, "factors": {...}}

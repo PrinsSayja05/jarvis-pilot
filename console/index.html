@@ -397,6 +397,11 @@
   .pill.done { color: var(--green); background: rgba(0,255,157,.07); } .pill.failed { color: var(--red); background: rgba(255,59,92,.08); }
   .pill.cancelled { color: var(--muted); } .pill.running, .pill.awaiting_approval { color: var(--cyan); background: rgba(0,212,255,.08); }
   .dry { font-size: 11px; color: var(--muted); margin-left: 6px; letter-spacing: 1px; }
+  .ceo-link { font: 700 10px/1 var(--display); letter-spacing: 1.6px; text-transform: uppercase; color: var(--amber);
+    padding: 7px 12px; border: 1px solid rgba(255,176,32,.5); border-radius: 999px; background: rgba(255,176,32,.08);
+    white-space: nowrap; border-bottom: 1px solid rgba(255,176,32,.5); }
+  .ceo-link:hover { background: rgba(255,176,32,.18); text-shadow: 0 0 8px var(--amber); }
+  .ceo-link[hidden] { display: none; }
   .load-chip { font: 700 10px/1 var(--display); letter-spacing: 1.5px; color: var(--muted); padding: 6px 10px; border: 1px solid rgba(0,212,255,.25); border-radius: 999px; white-space: nowrap; }
   .load-chip[hidden] { display: none; }
   .load-chip b { color: var(--cyan); font-weight: 700; } .load-chip.busy b.q { color: var(--amber); }
@@ -460,6 +465,7 @@
     <div class="spacer"></div>
     <div class="conn"><span id="dot" class="dot" role="status"></span><span id="conn"></span></div>
     <div id="loadChip" class="load-chip" role="status" hidden></div>
+    <a id="ceoLink" class="ceo-link" href="/ceo" target="_blank" rel="noopener noreferrer" hidden></a>
     <div class="clock" aria-live="off"><span id="clockTime">--:--:--</span><small id="clockDate"></small></div>
     <div id="userBox" class="user-box" aria-live="polite"></div>
     <button id="wakeBtn" class="wake-btn" type="button" aria-pressed="false"><span class="wake-dot" aria-hidden="true"></span><span id="wakeLabel">WAKE WORD</span></button>
@@ -648,6 +654,7 @@
   const I18N = {
     de: {
       standby: "STEHBEREIT", standbySub: "Ticket auswählen und aktivieren", activate: "AKTIVIERE JARVIS",
+      ceoView: "CEO-Ansicht ↗", ceoTitle: "Übersicht für die Geschäftsführung, nur Ansicht",
       loadChip: "LÄUFE {a} · WARTESCHLANGE {q}", loadTitle: "Aktive Läufe und wartende Läufe (eine Warteschlange je Person), für alle Nutzer",
       queuedLog: "In der Warteschlange (Position {p}): für diese Person läuft schon ein Lauf. Startet automatisch danach.", st_queued: "wartet",
       rejectReasonPh: "Warum abgelehnt? (optional)",
@@ -701,6 +708,7 @@
     },
     en: {
       standby: "STANDING BY", standbySub: "select a ticket and activate", activate: "ACTIVATE JARVIS",
+      ceoView: "CEO view ↗", ceoTitle: "Management overview, view only",
       loadChip: "RUNS {a} · QUEUED {q}", loadTitle: "Active runs and waiting runs (one queue per person), across all users",
       queuedLog: "Queued (position {p}): this person already has a run. It starts automatically afterwards.", st_queued: "queued",
       rejectReasonPh: "Why rejected? (optional)",
@@ -780,7 +788,7 @@
     $("flagDe").toggleAttribute("hidden", lang !== "de"); $("flagEn").toggleAttribute("hidden", lang !== "en");
     $("langBtn").setAttribute("aria-label", lang === "de" ? "Sprache: Deutsch – auf Englisch wechseln" : "Language: English – switch to German");
     renderDryToggle(); renderPhase(); renderConn(); renderTicketOptions(); renderStepLabels(); renderClock();
-    if (lastResult) renderResult(); if (lastRuns) renderHistory(); renderApprovals(); renderStats(); renderLoad();
+    if (lastResult) renderResult(); if (lastRuns) renderHistory(); renderApprovals(); renderStats(); renderLoad(); renderCeoLink();
     renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn(); if (auth.mode) renderUserBox(); wakeUiState = ""; if (typeof renderWake === "function") renderWake();
   }
   $("langBtn").addEventListener("click", () => {
@@ -914,8 +922,19 @@
   async function loadWhoami() {
     try { auth = await api("/api/whoami"); } catch (_) { auth = { mode: "demo", user: null, demo_people: [] }; }
     if (!auth.demo_people.some((p) => p.account_id === demoPerson)) demoPerson = "all";
-    renderUserBox();
+    renderUserBox(); renderCeoLink();
   }
+  // Shown for accounts listed in .jarvis/admins.json. This only decides what the console offers:
+  // /ceo itself answers anyone on the network until the Keycloak login lands (WMCNL-2533).
+  function renderCeoLink() {
+    const admins = auth.admins || [];
+    const who = (auth.mode === "keycloak" && auth.user) ? auth.user.jira_account_id : demoPerson;
+    const link = $("ceoLink");
+    link.textContent = t("ceoView");
+    link.title = t("ceoTitle");
+    link.toggleAttribute("hidden", !who || who === "all" || !admins.includes(who));
+  }
+
   function renderUserBox() {
     const box = $("userBox"); box.replaceChildren();
     const picker = () => {
@@ -928,7 +947,7 @@
       sel.addEventListener("change", () => {
         demoPerson = sel.value;
         try { localStorage.setItem("jarvis.demoPerson", demoPerson); } catch (_) { /* storage blocked */ }
-        loadTickets(); loadHistory();
+        renderCeoLink(); loadTickets(); loadHistory();
       });
       return wrap;
     };

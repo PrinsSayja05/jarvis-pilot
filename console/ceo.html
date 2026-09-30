@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS CEO-Ansicht</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000005; --glass: rgba(10, 22, 48, .42); --line: rgba(0, 212, 255, .16); --line-2: rgba(0, 212, 255, .34);
+    --text: #dff6ff; --muted: #6f8fb0; --cyan: #00d4ff; --blue: #2f7bff;
+    --green: #00ff9d; --red: #ff3b5c; --amber: #ffb020;
+    --display: "Orbitron", "Segoe UI", system-ui, sans-serif;
+    --ui: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 500 16px/1.5 var(--ui); }
+  body { min-height: 100vh; overflow-x: hidden; padding-bottom: 40px; }
+  a { color: var(--cyan); text-decoration: none; border-bottom: 1px dashed rgba(0,212,255,.5); }
+  a:hover { text-shadow: 0 0 8px var(--cyan); }
+
+  .grid-floor { position: fixed; inset: auto 0 0 0; height: 45vh; z-index: 0; pointer-events: none; opacity: .3;
+    background-image: linear-gradient(rgba(0,212,255,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(0,212,255,.18) 1px, transparent 1px);
+    background-size: 48px 48px; transform: perspective(500px) rotateX(62deg); transform-origin: bottom; }
+  .vignette { position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 40%, transparent 42%, rgba(0,0,5,.85) 100%); }
+  .wrap { position: relative; z-index: 2; max-width: 1180px; margin: 0 auto; padding: 22px 18px 0; }
+
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+  .brand { font: 900 27px/1 var(--display); letter-spacing: 5px; color: var(--cyan); text-shadow: 0 0 22px rgba(0,212,255,.55); }
+  .brand small { display: block; font: 500 10px/1 var(--display); letter-spacing: 4px; color: var(--muted); margin-top: 7px; }
+  .spacer { flex: 1; }
+  .badge { font: 700 10px/1 var(--display); letter-spacing: 2px; text-transform: uppercase; padding: 7px 12px;
+    border-radius: 999px; color: var(--amber); border: 1px solid rgba(255,176,32,.5); background: rgba(255,176,32,.08); }
+  .stamp { font: 500 13px var(--ui); color: var(--muted); letter-spacing: .5px; }
+
+  .panel { position: relative; background: var(--glass); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; backdrop-filter: blur(7px); margin-bottom: 18px; }
+  .ptitle { margin: 0 0 14px; font: 700 13px/1 var(--display); letter-spacing: 3px; color: var(--cyan); text-transform: uppercase; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 18px; }
+  .card { background: var(--glass); border: 1px solid var(--line); border-radius: 10px; padding: 20px; backdrop-filter: blur(7px); }
+  .card .v { font: 900 40px/1 var(--display); color: var(--cyan); text-shadow: 0 0 20px rgba(0,212,255,.35); }
+  .card .v.good { color: var(--green); text-shadow: 0 0 20px rgba(0,255,157,.3); }
+  .card .v.warn { color: var(--amber); text-shadow: 0 0 20px rgba(255,176,32,.3); }
+  .card .k { margin-top: 10px; font: 700 11px/1.3 var(--display); letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
+  .card .d { margin-top: 6px; font-size: 13px; color: var(--muted); }
+
+  .trend { margin-top: 6px; font: 700 12px/1.3 var(--display); letter-spacing: 1px; }
+  .trend.up { color: var(--green); } .trend.down { color: var(--red); } .trend.flat { color: var(--muted); }
+  .spark { display: flex; align-items: flex-end; gap: 3px; height: 34px; margin-top: 12px; }
+  .spark i { flex: 1; min-width: 4px; border-radius: 2px 2px 0 0; background: linear-gradient(180deg, var(--cyan), rgba(0,212,255,.25)); }
+  .spark i.low { background: linear-gradient(180deg, var(--red), rgba(255,59,92,.25)); }
+  .spark i.mid { background: linear-gradient(180deg, var(--amber), rgba(255,176,32,.25)); }
+  .spark-note { margin-top: 6px; font-size: 11px; color: var(--muted); letter-spacing: .5px; }
+  .score { display: inline-block; margin-left: 8px; padding: 3px 7px; border-radius: 4px; font: 700 10px/1 var(--display);
+    letter-spacing: 1px; border: 1px solid currentColor; color: var(--cyan); background: rgba(0,212,255,.08); white-space: nowrap; }
+  .score.low { color: var(--red); background: rgba(255,59,92,.08); }
+  .score.mid { color: var(--amber); background: rgba(255,176,32,.08); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; padding: 9px 10px; font: 700 10px/1 var(--display); letter-spacing: 1.6px;
+    color: var(--muted); text-transform: uppercase; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+  td { padding: 11px 10px; border-bottom: 1px solid rgba(0,212,255,.08); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  .mono { font-family: var(--display); font-size: 12px; letter-spacing: 1px; color: var(--text); white-space: nowrap; }
+  .pill { display: inline-block; padding: 4px 10px; border-radius: 4px; font: 700 10px/1 var(--display);
+    letter-spacing: 1.4px; text-transform: uppercase; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.done { color: var(--green); background: rgba(0,255,157,.08); }
+  .pill.failed { color: var(--red); background: rgba(255,59,92,.08); }
+  .pill.cancelled { color: var(--muted); }
+  .pill.running, .pill.awaiting_approval, .pill.queued { color: var(--cyan); background: rgba(0,212,255,.08); }
+  .dry { font-size: 11px; color: var(--muted); margin-left: 6px; letter-spacing: 1px; }
+  .via { display: block; font-size: 12px; color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 22px; letter-spacing: 1px; }
+  .note { margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; padding: 7px 16px; text-align: center;
+    font: 500 11px var(--display); letter-spacing: 2px; color: var(--muted);
+    background: linear-gradient(0deg, rgba(0,0,5,.95), rgba(0,0,5,0)); }
+  @media (max-width: 720px) {
+    .brand { font-size: 21px; letter-spacing: 3px; }
+    th:nth-child(5), td:nth-child(5) { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="grid-floor" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="wrap">
+  <header>
+    <div class="brand">J.A.R.V.I.S<small>CEO-Ansicht</small></div>
+    <div class="spacer"></div>
+    <div class="badge">Nur Ansicht</div>
+    <div class="stamp" id="stamp" aria-live="polite">…</div>
+  </header>
+
+  <section class="cards" id="cards" aria-label="Kennzahlen"></section>
+
+  <section class="panel" aria-labelledby="h-runs">
+    <h2 id="h-runs" class="ptitle">Letzte 20 Läufe</h2>
+    <div id="runs"><div class="empty">Wird geladen …</div></div>
+    <div class="note">Diese Ansicht ändert nichts. Freigaben erfolgen ausschließlich in der Konsole oder in Telegram.</div>
+  </section>
+</div>
+
+<footer>SOKRATES-1 · 192.168.178.75 · Aktualisierung alle 30 Sekunden</footer>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const API = location.origin;
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  // Same strict check as the console: only a real https:// string becomes a link. Resolving
+  // against the origin would turn a missing PR (null) into a link to /null.
+  const safeUrl = (u) => (typeof u === "string" && /^https:\/\//i.test(u)) ? u : null;
+  const secs = (v) => (v === null || v === undefined ? "–" : Math.round(v) + "s");
+  const clock = (iso) => { const d = new Date(iso); return isNaN(d) ? "–" : d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }); };
+
+  function renderCards(d) {
+    const box = $("cards"); box.replaceChildren();
+    const card = (value, label, hint, cls) => {
+      const c = el("div", "card");
+      c.append(el("div", "v" + (cls ? " " + cls : ""), value), el("div", "k", label));
+      if (hint) c.appendChild(el("div", "d", hint));
+      box.appendChild(c);
+    };
+    const rate = d.success_rate;
+    card(String(d.runs_today), "Läufe heute", d.finished_today + " abgeschlossen");
+    card(rate === null ? "–" : rate + "%", "Erfolgsquote heute",
+         d.finished_today ? "von " + d.finished_today + " abgeschlossenen" : "noch keine abgeschlossen",
+         rate === null ? "" : (rate >= 80 ? "good" : "warn"));
+    card(secs(d.avg_duration_seconds), "Ø Dauer heute", "über alle Läufe von heute");
+    card(String(d.open_prs), "Offene Pull Requests", "warten auf Prüfung", d.open_prs ? "warn" : "good");
+    renderRatingCard(box, d.self_rating || {});
+  }
+
+  const scoreClass = (n) => (n >= 8 ? "" : n >= 5 ? "mid" : "low");
+
+  // Self-rating: the number, which way it is moving, and the last ten scores as bars.
+  function renderRatingCard(box, r) {
+    const c = el("div", "card");
+    const value = r.current === null || r.current === undefined ? "–" : r.current + "/10";
+    c.append(el("div", "v" + (r.current ? " " + (scoreClass(r.current) === "" ? "good" : scoreClass(r.current)) : ""), value),
+             el("div", "k", "Selbstbewertung"));
+    const arrow = { "verbessert sich": "↑", "wird schlechter": "↓", "stabil": "→" }[r.trend] || "";
+    const cls = { "verbessert sich": "up", "wird schlechter": "down", "stabil": "flat" }[r.trend] || "flat";
+    if (r.trend && r.trend !== "unbekannt") {
+      const t = el("div", "trend " + cls, arrow + " " + r.trend);
+      if (r.previous !== null && r.previous !== undefined) t.append(el("span", "", "  (vorher " + r.previous + ")"));
+      c.appendChild(t);
+    } else {
+      c.appendChild(el("div", "d", r.rated_runs ? "Vergleich ab 20 bewerteten Läufen" : "noch keine bewerteten Läufe"));
+    }
+    const series = r.series || [];
+    if (series.length) {
+      const spark = el("div", "spark");
+      spark.title = "Letzte " + series.length + " Selbstbewertungen, älteste links";
+      for (const n of series) {
+        const bar = el("i", scoreClass(n));
+        bar.style.height = Math.max(8, Math.round((n / 10) * 34)) + "px";
+        bar.title = n + "/10";
+        spark.appendChild(bar);
+      }
+      c.append(spark, el("div", "spark-note", "letzte " + series.length + " Läufe, älteste links"));
+    }
+    box.appendChild(c);
+  }
+
+  function renderRuns(rows) {
+    const box = $("runs"); box.replaceChildren();
+    if (!rows.length) { box.appendChild(el("div", "empty", "Noch keine Läufe verzeichnet.")); return; }
+    const table = el("table"), thead = el("thead"), head = el("tr"), tbody = el("tbody");
+    for (const h of ["Ticket", "Zuständig", "Status", "Freigabe", "Dauer", "PR"]) head.appendChild(el("th", "", h));
+    thead.appendChild(head); table.appendChild(thead);
+    for (const r of rows) {
+      const tr = el("tr");
+      const tk = el("td", "mono", r.ticket_id || "–");
+      if (r.dry_run) tk.appendChild(el("span", "dry", "TROCKEN"));
+      tr.appendChild(tk);
+      tr.appendChild(el("td", "", r.assignee || "–"));
+      const st = el("td");
+      st.appendChild(el("span", "pill " + (r.status || ""), r.status_de || r.status || "–"));
+      if (typeof r.self_rating === "number") {
+        const badge = el("span", "score " + scoreClass(r.self_rating), r.self_rating + "/10");
+        badge.title = r.self_reasoning || "";
+        st.appendChild(badge);
+      }
+      tr.appendChild(st);
+      const ap = el("td");
+      if (r.approved_by) {
+        ap.appendChild(document.createTextNode(r.approved_by));
+        if (r.approved_via) ap.appendChild(el("span", "via", r.approved_via));
+      } else ap.textContent = "–";
+      tr.appendChild(ap);
+      tr.appendChild(el("td", "mono", secs(r.duration_seconds)));
+      const pr = el("td"), u = safeUrl(r.pr_url);
+      if (u) { const a = el("a", "", "PR ↗"); a.href = u; a.target = "_blank"; a.rel = "noopener noreferrer"; pr.appendChild(a); }
+      else pr.textContent = "–";
+      tr.appendChild(pr);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody); box.appendChild(table);
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(API + "/api/ceo-dashboard?limit=20");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const d = await res.json();
+      renderCards(d); renderRuns(d.rows || []);
+      const busy = d.active_runs && (d.active_runs.active || d.active_runs.queued)
+        ? `  ·  ${d.active_runs.active} aktiv, ${d.active_runs.queued} wartend` : "";
+      $("stamp").textContent = "Stand " + clock(d.generated_at) + busy;
+    } catch (err) {
+      $("stamp").textContent = "Keine Verbindung zur Konsole";
+      $("runs").replaceChildren(el("div", "empty", "Daten nicht verfügbar (" + err.message + ")"));
+    }
+  }
+
+  load();
+  setInterval(load, 30000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+})();
+</script>
+</body>
+</html>

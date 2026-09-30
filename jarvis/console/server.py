@@ -47,6 +47,9 @@ logger = logging.getLogger("jarvis.console")
 _ROOT = Path(__file__).resolve().parents[2]
 _INDEX_HTML = _ROOT / "console" / "index.html"
 _HISTORY_FILE = _ROOT / ".jarvis" / "console_history.json"
+_CEO_HTML = _ROOT / "console" / "ceo.html"
+# Jira account ids that see the CEO view link. Editable without touching .env or restarting.
+_ADMINS_FILE = _ROOT / ".jarvis" / "admins.json"
 
 # Local dev + the LAN addresses the jarvis-console service on SOKRATES-1 is opened from.
 # CONSOLE_EXTRA_ORIGINS (comma separated) adds more, e.g. a test instance on another port.
@@ -69,6 +72,7 @@ _CHAT_MAX_HISTORY = 20
 _TICKET_RE = re.compile(r"^[A-Z][A-Z0-9]{1,9}-\d{1,7}$")
 _PROJECT_RE = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 _APPROVAL_TIMEOUT_SECONDS = 15 * 60
+_WS_LINGER_SECONDS = 20  # how long a finished run's socket waits for the self-rating note
 _HISTORY_LIMIT = 20
 
 app = FastAPI(title="JARVIS Console")
@@ -412,6 +416,167 @@ def public_config() -> dict:
     return {"github_org": github.org, "pilot_repo": github.pilot_repo, "github_auth": github.auth_mode}
 
 
+_RATING_WINDOW = 10
+
+
+def _rating_trend(ordered: list[dict]) -> dict:
+    """Average of the last 10 rated runs against the 10 before them. Runs that were never rated
+    are skipped, so the comparison is always ten scores against ten scores."""
+    scores = [r["self_rating"]["score"] for r in ordered
+              if isinstance(r.get("self_rating"), dict) and isinstance(r["self_rating"].get("score"), int)]
+    recent, earlier = scores[:_RATING_WINDOW], scores[_RATING_WINDOW:2 * _RATING_WINDOW]
+    average = lambda xs: round(sum(xs) / len(xs), 1) if xs else None
+    current, previous = average(recent), average(earlier)
+    if current is None or previous is None:
+        trend = "unbekannt"
+    elif current - previous >= 0.3:
+        trend = "verbessert sich"
+    elif previous - current >= 0.3:
+        trend = "wird schlechter"
+    else:
+        trend = "stabil"
+    return {
+        "current": current,
+        "previous": previous,
+        "trend": trend,
+        "rated_runs": len(scores),
+        "window": _RATING_WINDOW,
+        "series": list(reversed(recent)),   # oldest first, for a left to right sparkline
+    }
+
+
+def _fill_assignee_names(ticket_ids: list[str]) -> None:
+    """One Jira lookup for every ticket in the table whose assignee we have not seen yet.
+    Best effort: a name is decoration, its absence must not break the overview."""
+    unknown = sorted({t for t in ticket_ids if t and _TICKET_RE.match(t) and t not in _assignee_name_cache})
+    if not unknown:
+        return
+    try:
+        client = JiraClient(_get_config().jira)
+        by_account = {p["account_id"]: p["name"] for p in _demo_people()}
+        for key, account in client.assignees_of(unknown).items():
+            _assignee_name_cache[key] = by_account.get(account, "")
+    except Exception as exc:
+        logger.info("assignee names for the CEO view failed: %s", type(exc).__name__)
+    for key in unknown:                     # do not ask again for tickets that have no assignee
+        _assignee_name_cache.setdefault(key, "")
+
+
+def _admin_accounts() -> list[str]:
+    """Who is offered the CEO view. This decides what the console *shows*, not what it allows:
+    /api/ceo-dashboard and /ceo answer anyone on the network, exactly like the rest of the console
+    today. Real access control arrives with the Keycloak login (WMCNL-2533, WMCNL-2606)."""
+    try:
+        data = json.loads(_ADMINS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if isinstance(data, dict):
+        data = data.get("admins", [])
+    return [str(a) for a in data if isinstance(a, str)] if isinstance(data, list) else []
+
+
+@app.get("/ceo")
+def ceo_page() -> FileResponse:
+    if not _CEO_HTML.is_file():
+        raise HTTPException(status_code=404, detail="console/ceo.html not found")
+    return FileResponse(_CEO_HTML, media_type="text/html")
+
+
+_STATUS_DE = {"done": "fertig", "failed": "fehlgeschlagen", "cancelled": "abgebrochen",
+              "running": "läuft", "awaiting_approval": "wartet auf Freigabe", "queued": "wartet"}
+_SOURCE_DE = {"telegram": "Telegram", "keycloak": "Konsole (angemeldet)",
+              "demo-auswahl": "Konsole (Demo-Auswahl)", "cli": "Terminal",
+              "auto-approve": "Terminal (auto)", "system": "Zeitablauf"}
+
+
+@app.get("/api/ceo-dashboard")
+def ceo_dashboard(limit: int = 20) -> dict:
+    """Read-only overview for management. No approve or reject here by design.
+
+    Security: open to anyone who can reach the console, like every other endpoint while the
+    Keycloak login is deferred. It exposes ticket keys, names and PR links, no secrets. Before
+    this is used outside the office network it needs the real login (WMCNL-2533, WMCNL-2606).
+    """
+    limit = max(1, min(limit, 100))
+    runs = {r["run_id"]: r for r in audit.merged_runs()}
+
+    # who decided each run, and from where
+    decisions: dict[str, dict] = {}
+    for row in audit.read_jsonl(audit.APPROVAL_LOG):
+        decisions.setdefault(row.get("run_id", ""), row)
+
+    live = {r.run_id: r for r in list(_runs.values())}
+    for run_id, record in live.items():                     # runs still going, not yet in the log
+        runs.setdefault(run_id, {"run_id": run_id, "ticket_id": record.ticket_id,
+                                 "status": record.status, "started_at": record.started_at,
+                                 "dry_run": record.dry_run})
+
+    ordered = sorted(runs.values(), key=lambda r: r.get("started_at") or r.get("logged_at") or "",
+                     reverse=True)
+    today = datetime.now(timezone.utc).date().isoformat()
+    todays = [r for r in ordered if (r.get("started_at") or "").startswith(today)]
+    finished_today = [r for r in todays if r.get("status") in ("done", "failed", "cancelled")]
+    done_today = [r for r in finished_today if r.get("status") == "done"]
+    durations = [r["duration_seconds"] for r in todays if isinstance(r.get("duration_seconds"), (int, float))]
+
+    _fill_assignee_names([r.get("ticket_id", "") for r in ordered[:limit]])
+
+    rows = []
+    for r in ordered[:limit]:
+        record = live.get(r["run_id"])
+        decision = decisions.get(r["run_id"], {})
+        assignee = ""
+        if record is not None:
+            assignee = record.assignee_name
+        if not assignee:
+            assignee = _assignee_name_cache.get(r.get("ticket_id", ""), "")
+        rows.append({
+            "run_id": r["run_id"],
+            "ticket_id": r.get("ticket_id", ""),
+            "assignee": assignee,
+            "status": r.get("status", ""),
+            "status_de": _STATUS_DE.get(r.get("status", ""), r.get("status", "")),
+            "dry_run": bool(r.get("dry_run")),
+            "started_at": r.get("started_at"),
+            "duration_seconds": r.get("duration_seconds"),
+            "approved_by": decision.get("actor", ""),
+            "approved_via": _SOURCE_DE.get(decision.get("actor_source", ""), decision.get("actor_source", "")),
+            "decision": decision.get("decision", ""),
+            "pr_url": r.get("pr_url"),
+            "self_rating": (r.get("self_rating") or {}).get("score"),
+            "self_reasoning": (r.get("self_rating") or {}).get("reasoning", ""),
+        })
+
+    config = _get_config()
+    # Tickets route to different repos via their repo: label, so counting only the pilot repo
+    # would miss PRs. Look at the pilot repo plus every repo a recent run opened a PR in.
+    repos = {f"{config.github.org}/{config.github.pilot_repo}"}
+    for r in ordered[:50]:
+        match = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/", r.get("pr_url") or "")
+        if match:
+            repos.add(match.group(1))
+    open_prs = []
+    for repo in sorted(repos):
+        try:
+            open_prs += [url for branch, url in _open_prs(repo).items()
+                         if branch.startswith(config.git.branch_prefix)]
+        except Exception as exc:
+            logger.info("open PR count for %s failed: %s", repo, type(exc).__name__)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "runs_today": len(todays),
+        "finished_today": len(finished_today),
+        "success_rate": round(100 * len(done_today) / len(finished_today)) if finished_today else None,
+        "avg_duration_seconds": round(sum(durations) / len(durations), 1) if durations else None,
+        "self_rating": _rating_trend(ordered),
+        "open_prs": len(open_prs),
+        "open_pr_urls": open_prs[:20],
+        "active_runs": _queue.counts(),
+        "rows": rows,
+    }
+
+
 @app.get("/api/health")
 def health() -> dict:
     # "runs": system load for the console header (active runs, runs waiting in a per-person queue)
@@ -455,6 +620,7 @@ _ACCOUNT_RE = re.compile(r"^[A-Za-z0-9:\-]{6,128}$")
 _account_cache: dict[str, tuple[float, tuple[str, str] | None]] = {}
 _people_cache: dict[str, tuple[float, list[dict]]] = {}
 _assignee_cache: dict[str, tuple[float, str]] = {}
+_assignee_name_cache: dict[str, str] = {}   # ticket key -> display name, filled as tickets are listed
 
 
 def _jira_account(email: str) -> tuple[str, str] | None:
@@ -511,6 +677,7 @@ def whoami(request: Request) -> dict:
         body["user"] = {"name": user.get("name"), "username": user.get("username"), "email": user.get("email"),
                         "admin": bool(user.get("admin")), "jira_account_id": account[0] if account else None,
                         "jira_name": account[1] if account else None}
+    body["admins"] = _admin_accounts()   # which accounts are offered the CEO view
     if mode != "keycloak" or (user and user.get("admin")):
         try:
             body["demo_people"] = _demo_people()
@@ -528,6 +695,8 @@ def list_tickets(request: Request, project: str = "JW", assignee: str = "") -> l
     if view == "-":
         return []
     tickets = sorted(JiraClient(config.jira).search_open(project, assignee_id=view), key=lambda t: priority_rank(t.priority))
+    for t in tickets:  # the CEO view still wants a name for runs whose record is long gone
+        _assignee_name_cache[t.key] = t.assignee_name
     return [
         {"key": t.key, "summary": t.summary, "status": t.status, "type": t.issue_type, "url": t.url,
          "assignee": t.assignee_name, "priority": t.priority, "open_pr": _open_pr_for(t, config)}
@@ -561,6 +730,8 @@ def start_run(body: RunRequest, request: Request) -> dict:
         actor=actor,
     )
     record.person, record.assignee_name = _person_of(body.ticket_id)
+    if record.assignee_name:
+        _assignee_name_cache[body.ticket_id] = record.assignee_name
     with _runs_lock:
         _runs[record.run_id] = record
 
@@ -649,7 +820,7 @@ def metrics() -> dict:
     """Aggregated from what already exists: the run log (every finished run since 30.09.2026) plus the
     console history (last 20). A starting point only; the "time saved" business dashboard is V1 work."""
     runs: dict[str, dict] = {}
-    for r in list(_history) + audit.read_jsonl(audit.RUN_LOG):  # run log last: it has more fields
+    for r in list(_history) + audit.merged_runs():  # run log last: it has more fields
         if r.get("run_id"):
             runs[r["run_id"]] = {**runs.get(r["run_id"], {}), **r}
     rows = list(runs.values())
@@ -906,14 +1077,19 @@ async def stream_run(websocket: WebSocket, run_id: str) -> None:
 
     await websocket.accept()
     sent = 0
+    quiet_after_finish = 0.0
     try:
         while True:
             events, finished = record.snapshot(since=sent)
             for event in events:
                 await websocket.send_json(event)
             sent += len(events)
-            if finished and not events:
-                break
+            if finished:
+                # The self-rating is computed after the run ends, so stay a little longer and
+                # let that note reach the live log instead of only appearing on a reload.
+                quiet_after_finish = 0.0 if events else quiet_after_finish + 0.25
+                if quiet_after_finish >= _WS_LINGER_SECONDS:
+                    break
             await asyncio.sleep(0.25)
         await websocket.close()
     except WebSocketDisconnect:

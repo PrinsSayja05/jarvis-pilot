@@ -18,7 +18,7 @@ from typing import Callable
 from jarvis.clients.minio_client import MinioClient
 from jarvis.config import JarvisConfig
 from jarvis.models.plan import Plan
-from jarvis.audit import record_feedback
+from jarvis.audit import record_feedback, record_self_rating
 from jarvis.models.review import ReviewResult
 from jarvis.models.ticket import priority_label
 from jarvis.models.run import RunResult
@@ -34,6 +34,7 @@ from jarvis.steps.read_repo import read_repo, remove_clone
 from jarvis.steps.read_ticket import read_ticket
 from jarvis.steps.repair import repair
 from jarvis.steps.review import review
+from jarvis.steps.self_rating import rate_in_background
 from jarvis.steps.run_tests import run_tests
 
 logger = logging.getLogger("jarvis.pipeline")
@@ -79,6 +80,7 @@ def execute_run(
     )
 
     repo_map = None
+    ticket = None  # stays None when the ticket could not even be read
     marked = None  # ticket key carrying the jarvis-in-progress label, removed in `finally`
     who = ("", "")  # (assignee name, ticket URL) for the failure message; empty until the ticket is read
     try:
@@ -143,6 +145,8 @@ def execute_run(
     finally:
         result.state = machine.state
         result.ended_at = datetime.now(timezone.utc).isoformat()
+        result.dry_run = dry_run
+        _start_self_rating(result, ticket, config, tracker)
         if repo_map is not None:  # the clone is only needed during the run
             remove_clone(repo_map.local_path)
         if marked:  # whatever the outcome: done, cancelled or failed
@@ -152,6 +156,20 @@ def execute_run(
 
 
 _RISK_DE = {"low": "niedrig", "medium": "mittel", "high": "hoch"}
+
+
+def _start_self_rating(result, ticket, config, tracker) -> None:
+    """Score the finished run in the background. Nothing waits for it, and a failure here can
+    never change the outcome: the run is over by the time this starts."""
+    def store(rating: dict) -> None:
+        record_self_rating(result.run_id, result.ticket_id, rating)
+        result.self_rating = rating
+        tracker.note(f"Selbstbewertung: {rating['score']}/10 — {rating['reasoning']}")
+
+    try:
+        rate_in_background(result, ticket, config, on_done=store)
+    except Exception:
+        logger.exception("could not start the self-rating")
 
 
 def _safe_narrator(narrate: Callable[[str], None] | None) -> Callable[[str], None]:

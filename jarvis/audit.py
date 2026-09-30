@@ -110,6 +110,24 @@ def record_run(entry: dict) -> None:
     _append(RUN_LOG, {"logged_at": now_iso(), **entry})
 
 
+def record_self_rating(run_id: str, ticket_id: str, rating: dict) -> None:
+    """Appended after the run is already logged, because the rating is computed afterwards.
+    Readers merge every line of a run_id, so this fills in the field without rewriting anything."""
+    _append(RUN_LOG, {"logged_at": now_iso(), "run_id": run_id, "ticket_id": ticket_id,
+                      "self_rating": rating})
+
+
+def merged_runs() -> list[dict]:
+    """One entry per run, newest first, with later lines filled in over earlier ones."""
+    merged: dict[str, dict] = {}
+    for entry in reversed(read_jsonl(RUN_LOG)):        # read_jsonl is newest first, so go oldest first
+        run_id = entry.get("run_id")
+        if run_id:
+            merged.setdefault(run_id, {}).update(entry)
+    return sorted(merged.values(), key=lambda r: r.get("started_at") or r.get("logged_at") or "",
+                  reverse=True)
+
+
 # ---- feedback (data collection only) --------------------------------------------------------
 
 def record_feedback(kind: str, *, ticket_id: str, run_id: str, plan: Any, reason: str,
