@@ -36,7 +36,9 @@ from jarvis.console.auth import router as auth_router
 from jarvis.config import ConfigError, JarvisConfig, load_config
 from jarvis.models.plan import Plan
 from jarvis.models.run import RunResult
-from jarvis.pipeline import execute_run
+from jarvis.models.ticket import priority_rank
+from jarvis import audit
+from jarvis.pipeline import RunQueue, execute_run
 from jarvis.progress import ProgressTracker
 from jarvis.state import RunState
 
@@ -116,7 +118,9 @@ class RunRecord:
     ticket_id: str
     dry_run: bool
     started_at: str
-    status: str = "running"  # running | awaiting_approval | done | cancelled | failed
+    status: str = "running"  # queued | running | awaiting_approval | done | cancelled | failed
+    person: str = "unassigned"  # ticket assignee: the run queue key
+    actor: str = ""             # who started it (demo-selected name, not verified)
     state: str = "INIT"
     events: list[dict] = field(default_factory=list)
     plan: dict | None = None
@@ -145,6 +149,7 @@ class RunRecord:
                 "started_at": self.started_at,
                 "status": self.status,
                 "state": self.state,
+                "queue_position": _queue.position(self.run_id) if self.status == "queued" else 0,
                 "plan": self.plan,
                 "result": self.result,
                 "events": list(self.events),
@@ -153,6 +158,7 @@ class RunRecord:
 
 _runs: dict[str, RunRecord] = {}
 _runs_lock = threading.Lock()
+_queue = RunQueue()  # one run at a time per assignee, different assignees in parallel
 _history: list[dict] = []
 _config: JarvisConfig | None = None
 
@@ -257,6 +263,9 @@ def _worker(record: RunRecord, config: JarvisConfig) -> None:
         decided = record._approval.wait(timeout=_APPROVAL_TIMEOUT_SECONDS)
         if not decided:
             tracker.note("no decision within 15 minutes - treated as rejected")
+            audit.record_approval(run_id=record.run_id, ticket_id=record.ticket_id, decision="timeout", actor="system",
+                                  actor_source="system", risk_class=plan.risk_class, dry_run=record.dry_run,
+                                  reason="keine Entscheidung innerhalb von 15 Minuten")
         with record._lock:
             record.status = "running"
         return decided and record._approved
@@ -283,20 +292,54 @@ def _worker(record: RunRecord, config: JarvisConfig) -> None:
     with record._lock:
         record.status = status  # last, so a WebSocket never closes before the "finished" event is queued
 
-    _history.insert(
-        0,
-        {
-            "run_id": record.run_id,
-            "ticket_id": record.ticket_id,
-            "dry_run": record.dry_run,
-            "status": status,
-            "started_at": record.started_at,
-            "duration_seconds": view["duration_seconds"],
-            "pr_url": view["pr_url"],
-        },
-    )
+    entry = {
+        "run_id": record.run_id,
+        "ticket_id": record.ticket_id,
+        "dry_run": record.dry_run,
+        "status": status,
+        "started_at": record.started_at,
+        "duration_seconds": view["duration_seconds"],
+        "pr_url": view["pr_url"],
+    }
+    _history.insert(0, entry)
     del _history[_HISTORY_LIMIT:]
     _save_history()
+    audit.record_run({**entry, "source": "console", "person": record.person, "approved": view["approved"],
+                      "risk_class": (record.plan or {}).get("risk_class"),
+                      "repair_attempts": view["repair_attempts"] if not record.dry_run else None,
+                      "judge_warning": (not view["judge"]["passed"]) if view["judge"] else None})
+
+
+def _run_and_release(record: RunRecord, config: JarvisConfig) -> None:
+    try:
+        _worker(record, config)
+    finally:  # whatever happened, the person's next queued run may start
+        _queue.finished(record.person, record.run_id)
+
+
+def _person_of(ticket_id: str) -> str:
+    """The ticket's assignee (queue key). Unknown -> "unassigned", which queues conservatively."""
+    try:
+        account = JiraClient(_get_config().jira).assignees_of([ticket_id]).get(ticket_id, "")
+        _assignee_cache[ticket_id] = (time.monotonic(), account)
+        return account or "unassigned"
+    except Exception as exc:
+        logger.warning("assignee lookup for the run queue failed: %s", type(exc).__name__)
+        return "unassigned"
+
+
+def _actor(request: Request, claimed: str) -> tuple[str, str]:
+    """(name, source). Keycloak: the logged-in person. Demo mode: the name picked in the dropdown,
+    sent by the page and NOT verified; the source says so."""
+    mode, _ = auth_mode()
+    user = current_user(request) if mode == "keycloak" else None
+    if user:
+        return user.get("name") or user.get("username") or "?", "keycloak"
+    return (claimed.strip() or "Alle (keine Person gewählt)"), "demo-auswahl"
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
 
 
 def _active_run() -> RunRecord | None:
@@ -313,10 +356,13 @@ def _active_run() -> RunRecord | None:
 class RunRequest(BaseModel):
     ticket_id: str
     dry_run: bool = True
+    actor: str = Field(default="", max_length=100)   # demo-selected name, for the access log only
 
 
 class ApprovalRequest(BaseModel):
     approved: bool
+    reason: str = Field(default="", max_length=500)  # optional, for a rejection
+    actor: str = Field(default="", max_length=100)
 
 
 class TicketRequest(BaseModel):
@@ -352,7 +398,8 @@ def public_config() -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok"}
+    # "runs": system load for the console header (active runs, runs waiting in a per-person queue)
+    return {"status": "ok", "runs": _queue.counts()}
 
 
 _PR_CACHE_SECONDS = 60
@@ -464,10 +511,10 @@ def list_tickets(request: Request, project: str = "JW", assignee: str = "") -> l
     view = _view_as(request, assignee)
     if view == "-":
         return []
-    tickets = JiraClient(config.jira).search_open(project, assignee_id=view)
+    tickets = sorted(JiraClient(config.jira).search_open(project, assignee_id=view), key=lambda t: priority_rank(t.priority))
     return [
         {"key": t.key, "summary": t.summary, "status": t.status, "type": t.issue_type, "url": t.url,
-         "assignee": t.assignee_name, "open_pr": _open_pr_for(t, config)}
+         "assignee": t.assignee_name, "priority": t.priority, "open_pr": _open_pr_for(t, config)}
         for t in tickets
     ]
 
@@ -481,24 +528,47 @@ def create_ticket(body: TicketRequest) -> dict:
 
 
 @app.post("/api/run", status_code=202)
-def start_run(body: RunRequest) -> dict:
+def start_run(body: RunRequest, request: Request) -> dict:
     if not _TICKET_RE.match(body.ticket_id):
         raise HTTPException(status_code=422, detail="invalid ticket id")
     config = _get_config()
-    active = _active_run()
-    if active is not None:
-        raise HTTPException(status_code=409, detail=f"run {active.ticket_id} is still {active.status}")
+    actor, _source = _actor(request, body.actor)
+    audit.record_access(endpoint="/api/run", ip=_client_ip(request), name=actor,
+                        ticket_id=body.ticket_id, dry_run=body.dry_run)
 
     record = RunRecord(
         run_id=str(uuid.uuid4()),
         ticket_id=body.ticket_id,
         dry_run=body.dry_run,
         started_at=datetime.now(timezone.utc).isoformat(),
+        status="queued",
+        person=_person_of(body.ticket_id),
+        actor=actor,
     )
     with _runs_lock:
         _runs[record.run_id] = record
-    threading.Thread(target=_worker, args=(record, config), daemon=True, name=f"run-{record.ticket_id}").start()
-    return {"run_id": record.run_id}
+
+    queued = {"flag": False}  # set once submit() says "wait"
+
+    def start() -> None:
+        with record._lock:
+            record.status = "running"
+        if queued["flag"]:
+            record.add_event({"type": "note", "message": "Warteschlange: der vorige Lauf ist beendet, dieser Lauf startet jetzt"})
+        threading.Thread(target=_run_and_release, args=(record, config), daemon=True,
+                         name=f"run-{record.ticket_id}").start()
+
+    position = _queue.submit(record.person, record.run_id, start)
+    if not position:
+        with record._lock:
+            if record.status == "queued":  # started synchronously; status is set in start()
+                record.status = "running"
+    if position:
+        queued["flag"] = True
+        record.add_event({"type": "note", "message": f"In der Warteschlange, Position {position}: für diese Person läuft "
+                                                     "bereits ein Lauf. Dieser startet automatisch danach."})
+        logger.info("run %s for %s queued at position %d (person %s)", record.run_id, record.ticket_id, position, record.person)
+    return {"run_id": record.run_id, "queued": bool(position), "position": position}
 
 
 def _get_run(run_id: str) -> RunRecord:
@@ -520,14 +590,64 @@ def run_status(run_id: str) -> dict:
 
 
 @app.post("/api/run/{run_id}/approval")
-def decide(run_id: str, body: ApprovalRequest) -> dict:
+def decide(run_id: str, body: ApprovalRequest, request: Request) -> dict:
     record = _get_run(run_id)
     with record._lock:
         if record.status != "awaiting_approval":
             raise HTTPException(status_code=409, detail="run is not waiting for approval")
         record._approved = body.approved
+        plan = record.plan or {}
     record._approval.set()
+    # Audit after the decision took effect: logging must never delay or block the run.
+    actor, source = _actor(request, body.actor)
+    reason = body.reason if not body.approved else ""
+    audit.record_approval(run_id=run_id, ticket_id=record.ticket_id, decision="approved" if body.approved else "rejected",
+                          actor=actor, actor_source=source, risk_class=plan.get("risk_class", ""),
+                          dry_run=record.dry_run, reason=reason, ip=_client_ip(request))
+    if not body.approved:
+        audit.record_feedback("plan_rejected", ticket_id=record.ticket_id, run_id=run_id, plan=plan,
+                              reason=reason or "(kein Grund angegeben)", minio_settings=_get_config().minio,
+                              extra={"actor": actor, "actor_source": source, "dry_run": record.dry_run})
     return {"approved": body.approved}
+
+
+@app.get("/api/approvals")
+def approvals(limit: int = 20) -> list[dict]:
+    """The latest approvals, rejections and timeouts, newest first. IPs stay in the log file, not here."""
+    rows = audit.read_jsonl(audit.APPROVAL_LOG, max(1, min(limit, 100)))
+    return [{k: r.get(k) for k in ("ts", "ticket_id", "run_id", "decision", "actor", "actor_source",
+                                   "risk_class", "dry_run", "reason")} for r in rows]
+
+
+@app.get("/api/metrics")
+def metrics() -> dict:
+    """Aggregated from what already exists: the run log (every finished run since 30.09.2026) plus the
+    console history (last 20). A starting point only; the "time saved" business dashboard is V1 work."""
+    runs: dict[str, dict] = {}
+    for r in list(_history) + audit.read_jsonl(audit.RUN_LOG):  # run log last: it has more fields
+        if r.get("run_id"):
+            runs[r["run_id"]] = {**runs.get(r["run_id"], {}), **r}
+    rows = list(runs.values())
+    by_status = {s: sum(1 for r in rows if r.get("status") == s) for s in ("done", "failed", "cancelled")}
+    durations = [r["duration_seconds"] for r in rows if isinstance(r.get("duration_seconds"), (int, float))]
+    full = [r for r in rows if not r.get("dry_run")]
+    full_done = [r["duration_seconds"] for r in full if r.get("status") == "done" and isinstance(r.get("duration_seconds"), (int, float))]
+    repair_known = [r for r in full if r.get("repair_attempts") is not None]
+    judge_known = [r for r in full if r.get("judge_warning") is not None]
+    return {
+        "total_runs": len(rows),
+        "by_status": by_status,
+        "dry_runs": len(rows) - len(full),
+        "full_runs": len(full),
+        "avg_duration_seconds": round(sum(durations) / len(durations), 1) if durations else None,
+        "avg_duration_full_done_seconds": round(sum(full_done) / len(full_done), 1) if full_done else None,
+        "needed_repair": sum(1 for r in repair_known if r["repair_attempts"]),
+        "repair_known": len(repair_known),
+        "judge_warnings": sum(1 for r in judge_known if r["judge_warning"]),
+        "judge_reviewed": len(judge_known),
+        "since": min((r.get("started_at") or "" for r in rows), default=None) or None,
+        "load": _queue.counts(),
+    }
 
 
 @app.post("/api/voice-input")

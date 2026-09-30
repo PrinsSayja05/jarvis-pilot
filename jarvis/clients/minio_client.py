@@ -41,6 +41,11 @@ class MinioClient:
         )
         return object_key
 
+    def save_object(self, object_key: str, content: bytes, content_type: str = "application/octet-stream") -> str:
+        """Any key in the bucket, e.g. feedback/<day>/<file>.json (jarvis.audit)."""
+        self._client.put_object(_BUCKET, object_key, BytesIO(content), length=len(content), content_type=content_type)
+        return object_key
+
     def store_diff(self, run_id: str, diff_content: str) -> str:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         return self.save_run_artifact(

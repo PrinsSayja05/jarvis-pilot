@@ -14,7 +14,7 @@ from jarvis.models.plan import Plan
 from jarvis.models.pr_result import PullRequestResult
 from jarvis.models.review import ReviewResult
 from jarvis.models.test_result import TestResult
-from jarvis.models.ticket import JiraTicket
+from jarvis.models.ticket import JiraTicket, priority_label
 
 _MAX_STDOUT_CHARS = 3000
 
@@ -94,9 +94,10 @@ def build_pr_body(
     return f"""## JARVIS Run — {ticket.key}
 
 **Ticket:** [{ticket.key}] {ticket.summary}
+**Priorität / Priority:** {priority_label(ticket.priority) or "–"}
 **Run ID:** {run_id}
 **Date:** {date}
-**Plan approved by:** {approver} (Keycloak identity)
+**Plan approved by:** {approver}
 **Total duration:** {duration_seconds:.1f}s
 
 ---

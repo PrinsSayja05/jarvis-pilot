@@ -111,6 +111,13 @@
   .mic.busy { border-color: var(--cyan); color: var(--cyan); background: radial-gradient(circle, rgba(0,212,255,.25), rgba(0,30,60,.7)); box-shadow: 0 0 20px rgba(0,212,255,.4); }
   .mic.busy .mic-label { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
   @keyframes micpulse { 0% { box-shadow: 0 0 0 0 rgba(255,59,92,.8), 0 0 30px rgba(255,59,92,.8); } 100% { box-shadow: 0 0 0 26px rgba(255,59,92,0), 0 0 30px rgba(255,59,92,.8); } }
+  .ticket-info { margin-top: 10px; display: flex; align-items: center; gap: 10px; font: 600 15px/1.3 var(--ui); color: var(--muted); }
+  .ticket-info[hidden] { display: none; }
+  .ticket-info b { color: var(--text); font-family: var(--display); font-size: 12px; letter-spacing: 1px; }
+  .prio-badge { padding: 4px 10px; border-radius: 4px; font: 700 10px/1 var(--display); letter-spacing: 1.5px; text-transform: uppercase; border: 1px solid currentColor; }
+  .prio-badge.high { color: var(--red); background: rgba(255,59,92,.1); }
+  .prio-badge.medium { color: #9aa8b8; background: rgba(154,168,184,.08); }
+  .prio-badge.low { color: var(--blue); background: rgba(47,123,255,.1); }
   .pr-warn { margin-top: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,176,32,.55); background: rgba(255,176,32,.08);
     color: var(--amber); font: 600 15px/1.4 var(--ui); }
   .pr-warn[hidden] { display: none; }
@@ -390,6 +397,19 @@
   .pill.done { color: var(--green); background: rgba(0,255,157,.07); } .pill.failed { color: var(--red); background: rgba(255,59,92,.08); }
   .pill.cancelled { color: var(--muted); } .pill.running, .pill.awaiting_approval { color: var(--cyan); background: rgba(0,212,255,.08); }
   .dry { font-size: 11px; color: var(--muted); margin-left: 6px; letter-spacing: 1px; }
+  .load-chip { font: 700 10px/1 var(--display); letter-spacing: 1.5px; color: var(--muted); padding: 6px 10px; border: 1px solid rgba(0,212,255,.25); border-radius: 999px; white-space: nowrap; }
+  .load-chip[hidden] { display: none; }
+  .load-chip b { color: var(--cyan); font-weight: 700; } .load-chip.busy b.q { color: var(--amber); }
+  .reject-reason { width: 100%; margin-top: 14px; padding: 10px 12px; background: rgba(0,12,30,.8); color: var(--text); border: 1px solid rgba(255,59,92,.35); border-radius: 6px; font: 15px var(--ui); }
+  .reject-reason:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
+  .dec { font: 700 10px/1 var(--display); letter-spacing: 1.2px; text-transform: uppercase; }
+  .dec.approved { color: var(--green, #2fe39b); } .dec.rejected { color: var(--red); } .dec.timeout { color: var(--muted); }
+  .src { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat { padding: 12px; border: 1px solid rgba(0,212,255,.18); border-radius: 6px; background: rgba(0,212,255,.03); }
+  .stat .v { font: 700 24px/1.1 var(--display); color: var(--cyan); } .stat .k { margin-top: 6px; font-size: 12px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+  .stat .d { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .stats-note { margin-top: 10px; font-size: 12px; color: var(--muted); }
   .empty { color: var(--muted); text-align: center; padding: 16px; letter-spacing: 1px; }
 
   /* ---------- quick links ---------- */
@@ -439,6 +459,7 @@
     <div class="brand">J.A.R.V.I.S<small>WAMOCON SYSTEMS</small></div>
     <div class="spacer"></div>
     <div class="conn"><span id="dot" class="dot" role="status"></span><span id="conn"></span></div>
+    <div id="loadChip" class="load-chip" role="status" hidden></div>
     <div class="clock" aria-live="off"><span id="clockTime">--:--:--</span><small id="clockDate"></small></div>
     <div id="userBox" class="user-box" aria-live="polite"></div>
     <button id="wakeBtn" class="wake-btn" type="button" aria-pressed="false"><span class="wake-dot" aria-hidden="true"></span><span id="wakeLabel">WAKE WORD</span></button>
@@ -461,6 +482,7 @@
     <button id="reloadBtn" class="icon-btn" type="button" data-i18n-title="reload" data-i18n-aria="reload">↻</button>
   </div>
 
+  <div id="ticketInfo" class="ticket-info" hidden></div>
   <div id="prWarn" class="pr-warn" role="status" hidden></div>
 
   <div id="stage" class="stage idle hud">
@@ -536,6 +558,8 @@
       <button id="approveBtn" class="big approve" type="button" data-i18n="approve"></button>
       <button id="rejectBtn" class="big reject" type="button" data-i18n="reject"></button>
     </div>
+    <label for="rejectReason" class="sr" data-i18n="rejectReasonPh"></label>
+    <input id="rejectReason" class="reject-reason" type="text" maxlength="500" data-i18n-ph="rejectReasonPh">
     <div id="approvalHeard" class="heard" aria-live="polite"></div>
   </section>
 
@@ -556,6 +580,16 @@
   <section class="panel hud" aria-labelledby="h-hist">
     <h2 id="h-hist" class="ptitle" data-i18n="missionLog"></h2>
     <div id="history"></div>
+  </section>
+
+  <section class="panel hud" aria-labelledby="h-appr-hist">
+    <h2 id="h-appr-hist" class="ptitle" data-i18n="approvalHistory"></h2>
+    <div id="approvalHistory"></div>
+  </section>
+
+  <section class="panel hud" aria-labelledby="h-stats">
+    <h2 id="h-stats" class="ptitle" data-i18n="stats"></h2>
+    <div id="stats"></div>
   </section>
 
   <section class="panel hud" aria-labelledby="h-links">
@@ -614,6 +648,15 @@
   const I18N = {
     de: {
       standby: "STEHBEREIT", standbySub: "Ticket auswählen und aktivieren", activate: "AKTIVIERE JARVIS",
+      loadChip: "LÄUFE {a} · WARTESCHLANGE {q}", loadTitle: "Aktive Läufe und wartende Läufe (eine Warteschlange je Person), für alle Nutzer",
+      queuedLog: "In der Warteschlange (Position {p}): für diese Person läuft schon ein Lauf. Startet automatisch danach.", st_queued: "wartet",
+      rejectReasonPh: "Warum abgelehnt? (optional)",
+      approvalHistory: "GENEHMIGUNGSVERLAUF", noApprovals: "Noch keine Entscheidungen protokolliert.", colWhen: "Zeit", colRisk: "Risiko",
+      colDecision: "Entscheidung", colBy: "Von", colReason: "Grund", dec_approved: "genehmigt", dec_rejected: "abgelehnt", dec_timeout: "Zeitablauf",
+      src_demo: "(Demo-Auswahl, nicht geprüft)", src_cli: "(Terminal)",
+      stats: "STATISTIK", statTotal: "Läufe gesamt", statDone: "fertig", statFailed: "fehlgeschlagen", statCancelled: "abgebrochen",
+      statAvg: "Ø Dauer", statAvgFull: "Ø voller Lauf (fertig)", statRepair: "brauchten Reparatur", statJudge: "Judge-Warnungen",
+      statDryFull: "{d} Trockenläufe · {f} volle Läufe", statOf: "von {n} erfasst", statsNote: "Grundlage: Laufprotokoll seit {s}. Reparatur und Judge nur für volle Läufe.",
       createTicket: "NEUES TICKET", missionLog: "MISSION LOG", fullRun: "VOLLSTÄNDIGER LAUF", fullRunSub: "Öffnet einen Draft-PR, kommentiert Jira",
       dryRun: "TROCKENLAUF", dryRunSub: "Nur Plan, keine Codeänderung", approve: "PLAN GENEHMIGEN", reject: "ABLEHNEN",
       complete: "MISSION ABGESCHLOSSEN", failed: "MISSION FEHLGESCHLAGEN", selectTicket: "Ticket auswählen...",
@@ -637,6 +680,7 @@
       logApprovalFailed: "Freigabe fehlgeschlagen: ", couldNotStart: "Start fehlgeschlagen: ", ticketsPrefix: "Tickets: ",
       authBadge: "angemeldet", logout: "ABMELDEN", demoLabel: "DEMO:", demoAll: "Alle", demoToggle: "DEMO-MODUS",
       demoTitle: "Demo-Modus: Ansicht wie diese Person (keine echte Anmeldung)", noJira: "kein Jira-Konto zu {e}",
+      prio_highest: "Höchste", prio_high: "Hoch", prio_medium: "Mittel", prio_low: "Niedrig", prio_lowest: "Niedrigste",
       hasPr: "PR offen", prWarn: "Für dieses Ticket gibt es schon einen offenen PR. Ein neuer Lauf überschreibt dessen Code.", prWarnLink: "PR ansehen",
       confirmHasPr: "Achtung: Dieses Ticket hat bereits einen offenen PR ({u}). Ein voller Lauf überschreibt den Code auf diesem Branch.",
       confirmFull: "Vollständiger Lauf für {t}: Nach Ihrer Freigabe pusht JARVIS einen Branch, öffnet einen Draft-PR und kommentiert das Jira-Ticket. Fortfahren?",
@@ -657,6 +701,15 @@
     },
     en: {
       standby: "STANDING BY", standbySub: "select a ticket and activate", activate: "ACTIVATE JARVIS",
+      loadChip: "RUNS {a} · QUEUED {q}", loadTitle: "Active runs and waiting runs (one queue per person), across all users",
+      queuedLog: "Queued (position {p}): this person already has a run. It starts automatically afterwards.", st_queued: "queued",
+      rejectReasonPh: "Why rejected? (optional)",
+      approvalHistory: "APPROVAL HISTORY", noApprovals: "No decisions logged yet.", colWhen: "Time", colRisk: "Risk",
+      colDecision: "Decision", colBy: "By", colReason: "Reason", dec_approved: "approved", dec_rejected: "rejected", dec_timeout: "timed out",
+      src_demo: "(demo selection, not verified)", src_cli: "(terminal)",
+      stats: "STATISTICS", statTotal: "Total runs", statDone: "done", statFailed: "failed", statCancelled: "cancelled",
+      statAvg: "Avg duration", statAvgFull: "Avg full run (done)", statRepair: "needed repair", statJudge: "Judge warnings",
+      statDryFull: "{d} dry runs · {f} full runs", statOf: "of {n} recorded", statsNote: "Based on the run log since {s}. Repair and judge only for full runs.",
       createTicket: "CREATE TICKET", missionLog: "MISSION LOG", fullRun: "FULL RUN", fullRunSub: "Opens a draft PR, comments on Jira",
       dryRun: "DRY RUN", dryRunSub: "Plan only, no code change", approve: "APPROVE PLAN", reject: "REJECT",
       complete: "MISSION COMPLETE", failed: "MISSION FAILED", selectTicket: "Select ticket...",
@@ -680,6 +733,7 @@
       logApprovalFailed: "approval failed: ", couldNotStart: "Could not start: ", ticketsPrefix: "Tickets: ",
       authBadge: "signed in", logout: "SIGN OUT", demoLabel: "DEMO:", demoAll: "Everyone", demoToggle: "DEMO MODE",
       demoTitle: "Demo mode: view as this person (not a real login)", noJira: "no Jira account for {e}",
+      prio_highest: "Highest", prio_high: "High", prio_medium: "Medium", prio_low: "Low", prio_lowest: "Lowest",
       hasPr: "PR open", prWarn: "This ticket already has an open PR. A new run overwrites its code.", prWarnLink: "view PR",
       confirmHasPr: "Warning: this ticket already has an open PR ({u}). A full run overwrites the code on that branch.",
       confirmFull: "Full run for {t}: after you approve the plan, JARVIS pushes a branch, opens a draft PR and comments on the Jira ticket. Continue?",
@@ -726,7 +780,7 @@
     $("flagDe").toggleAttribute("hidden", lang !== "de"); $("flagEn").toggleAttribute("hidden", lang !== "en");
     $("langBtn").setAttribute("aria-label", lang === "de" ? "Sprache: Deutsch – auf Englisch wechseln" : "Language: English – switch to German");
     renderDryToggle(); renderPhase(); renderConn(); renderTicketOptions(); renderStepLabels(); renderClock();
-    if (lastResult) renderResult(); if (lastRuns) renderHistory();
+    if (lastResult) renderResult(); if (lastRuns) renderHistory(); renderApprovals(); renderStats(); renderLoad();
     renderMic(); renderHeard(); renderChatEmpty(); renderVoiceBtn(); if (auth.mode) renderUserBox(); wakeUiState = ""; if (typeof renderWake === "function") renderWake();
   }
   $("langBtn").addEventListener("click", () => {
@@ -821,11 +875,20 @@
     $("dot").setAttribute("aria-label", t(connected ? "connected" : "disconnected"));
     $("conn").textContent = connected ? t("connected") + " · " + (location.host || HOST) : t("disconnected");
   }
+  let load = null;                                            // {active, queued} from /api/health, all users
+  function renderLoad() {
+    const n = $("loadChip"); n.hidden = !load || !connected; if (n.hidden) return;
+    n.replaceChildren(); n.title = t("loadTitle");
+    const [a, q] = t("loadChip", { a: "\u0001", q: "\u0002" }).split(/[\u0001\u0002]/);
+    n.append(document.createTextNode(a), el("b", "", String(load.active)), document.createTextNode(q), el("b", "q", String(load.queued)));
+    n.classList.toggle("busy", load.queued > 0);
+  }
   async function ping() {
     let ok = false;
-    try { ok = (await api("/api/health")).status === "ok"; } catch (_) { ok = false; }
-    if (ok && !connected) { loadWhoami().then(() => { loadTickets(); loadHistory(); }); loadPublicConfig(); }
-    connected = ok; renderConn();
+    try { const h = await api("/api/health"); ok = h.status === "ok"; load = h.runs || null; } catch (_) { ok = false; }
+    if (ok && !connected) { loadWhoami().then(() => { loadTickets(); loadHistory(); }); loadPublicConfig(); loadApprovals(); loadStats(); }
+
+    connected = ok; renderConn(); renderLoad();
   }
 
   // GitHub link follows GITHUB_ORG / GITHUB_PILOT_REPO from the server config.
@@ -842,6 +905,11 @@
   try { demoPerson = localStorage.getItem("jarvis.demoPerson") || "all"; demoOn = localStorage.getItem("jarvis.demoOn") === "on"; } catch (_) { /* storage blocked */ }
   const demoActive = () => auth.mode !== "keycloak" || (auth.user && auth.user.admin && demoOn);
   // Empty = the server decides (Keycloak: the logged-in person). Demo: the picked person, or everybody.
+  const actorName = () => {
+    if (auth.mode === "keycloak" && auth.user) return auth.user.name || auth.user.username || "";
+    const p = auth.demo_people.find((x) => x.account_id === demoPerson);
+    return p ? p.name : "";
+  };
   const viewParam = () => demoActive() ? "&assignee=" + encodeURIComponent(demoPerson || "all") : "";
   async function loadWhoami() {
     try { auth = await api("/api/whoami"); } catch (_) { auth = { mode: "demo", user: null, demo_people: [] }; }
@@ -913,11 +981,22 @@
     else if (!tickets.length) sel.appendChild(new Option(t("noTickets"), ""));
     else {
       sel.appendChild(new Option(t("selectTicket"), ""));
-      for (const tk of tickets) sel.appendChild(new Option(tk.key + "  ·  " + tk.summary + "   [" + tk.status + "]" + (tk.open_pr ? "   ⚠ " + t("hasPr") : ""), tk.key));
+      for (const tk of tickets) sel.appendChild(new Option(prioDot(tk.priority) + " " + tk.key + "  ·  " + tk.summary + "   [" + tk.status + "]" + (tk.open_pr ? "   ⚠ " + t("hasPr") : ""), tk.key));
       if (keep && tickets.some((tk) => tk.key === keep)) sel.value = keep;
     }
-    updateStart(); renderPrWarn();
+    updateStart(); renderPrWarn(); renderTicketInfo();
     if (lastRuns) renderHistory();                          // history badges need the PR info
+  }
+  // Priority: red Highest/High, grey Medium, blue Low/Lowest (same ranking as the server, not Jira's list order)
+  const prioClass = (p) => { const k = (p || "").toLowerCase(); return k === "highest" || k === "high" ? "high" : k.startsWith("low") ? "low" : "medium"; };
+  const prioDot = (p) => ({ high: "🔴", medium: "⚪", low: "🔵" })[prioClass(p)];
+  const prioText = (p) => t("prio_" + ((p || "medium").toLowerCase().replace(" (migrated)", "")));
+  function renderTicketInfo() {
+    const n = $("ticketInfo"), tk = Array.isArray(tickets) && tickets.find((x) => x.key === $("ticketSelect").value);
+    n.replaceChildren(); n.hidden = !tk;
+    if (!tk) return;
+    n.append(el("span", "prio-badge " + prioClass(tk.priority), prioText(tk.priority)), el("b", "", tk.key),
+             document.createTextNode("  " + (tk.assignee ? "· " + tk.assignee : "")));
   }
   const openPrOf = (key) => (Array.isArray(tickets) && (tickets.find((tk) => tk.key === key) || {}).open_pr) || null;
   // Warning under the dropdown: this ticket already has an open JARVIS PR.
@@ -933,7 +1012,7 @@
     catch (e) { tickets = "error"; say("runMsg", t("ticketsPrefix") + e.message, "err"); }
     renderTicketOptions(select);
   }
-  $("ticketSelect").addEventListener("change", () => { updateStart(); renderPrWarn(); });
+  $("ticketSelect").addEventListener("change", () => { updateStart(); renderPrWarn(); renderTicketInfo(); });
   $("reloadBtn").addEventListener("click", () => loadTickets($("ticketSelect").value));
   function renderDryToggle() {
     const dry = $("dryRun").checked;
@@ -950,8 +1029,9 @@
     btn.classList.remove("pulse"); void btn.offsetWidth; btn.classList.add("pulse");
     btn.disabled = true; say("runMsg", "");
     try {
-      const { run_id } = await post("/api/run", { ticket_id: ticket, dry_run: dryRun });
+      const { run_id, queued, position } = await post("/api/run", { ticket_id: ticket, dry_run: dryRun, actor: actorName() });
       beginRun(run_id, ticket, dryRun);
+      if (queued) { setPhase("initializing", { text: t("st_queued") + " #" + position }, { t: ticket }); log(t("queuedLog", { p: position }), "s"); }
     } catch (e) { say("runMsg", t("couldNotStart") + e.message, "err"); updateStart(); }
   });
 
@@ -1088,6 +1168,7 @@
     const risk = $("planRisk"); risk.textContent = p.risk_class; risk.className = "risk " + (["low", "medium", "high"].includes(p.risk_class) ? p.risk_class : "");
     $("planTokens").textContent = "≈ " + p.estimated_tokens + " " + t("tokens");
     $("approveBtn").disabled = $("rejectBtn").disabled = false;
+    $("rejectReason").value = "";
     $("approval").classList.add("show");
     $("approval").scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -1098,7 +1179,8 @@
     if (activeRecorder && activeRecorder.state === "recording") activeRecorder.stop();
     $("approveBtn").disabled = $("rejectBtn").disabled = true;
     try {
-      await post("/api/run/" + currentRun.id + "/approval", { approved });
+      await post("/api/run/" + currentRun.id + "/approval", { approved, reason: approved ? "" : $("rejectReason").value.trim(), actor: actorName() });
+      loadApprovals();
       $("approval").classList.remove("show");
       log(t(approved ? "logApproved" : "logRejected"), approved ? "g" : "e");
       setMood("working"); if (approved) burst();
@@ -1129,7 +1211,7 @@
     lastResult = { ev, run }; renderResult();
     updateStart();
     setTimeout(() => $("result").scrollIntoView({ behavior: "smooth", block: "center" }), 150);
-    loadHistory();
+    loadHistory(); loadApprovals(); loadStats();
   }
 
   function renderResult() {
@@ -1183,6 +1265,58 @@
       tr.appendChild(pr); tbody.appendChild(tr);
     }
     table.appendChild(tbody); box.appendChild(table);
+  }
+
+  /* ---------- approval history (audit trail, last 20) ---------- */
+  let lastApprovals = null;
+  async function loadApprovals() {
+    try { lastApprovals = await api("/api/approvals?limit=20"); } catch (_) { lastApprovals = "offline"; }
+    renderApprovals();
+  }
+  function renderApprovals() {
+    const box = $("approvalHistory"); if (lastApprovals === null) return; box.replaceChildren();
+    if (lastApprovals === "offline") { box.appendChild(el("div", "empty", t("historyOffline"))); return; }
+    if (!lastApprovals.length) { box.appendChild(el("div", "empty", t("noApprovals"))); return; }
+    const table = el("table"), head = el("tr"), tbody = el("tbody"), thead = el("thead");
+    ["colWhen", "colTicket", "colRisk", "colDecision", "colBy", "colReason"].forEach((h) => head.appendChild(el("th", "", t(h))));
+    thead.appendChild(head); table.appendChild(thead);
+    for (const a of lastApprovals) {
+      const tr = el("tr");
+      const d = new Date(a.ts);
+      tr.appendChild(el("td", "mono", isNaN(d) ? a.ts : d.toLocaleString(lang === "de" ? "de-DE" : "en-GB", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })));
+      const tk = el("td", "mono", a.ticket_id); if (a.dry_run) tk.appendChild(el("span", "dry", t("dry"))); tr.appendChild(tk);
+      const rk = el("td"); rk.appendChild(el("span", "risk " + (["low", "medium", "high"].includes(a.risk_class) ? a.risk_class : ""), a.risk_class || "–")); tr.appendChild(rk);
+      const dc = el("td"); dc.appendChild(el("span", "dec " + a.decision, t("dec_" + a.decision))); tr.appendChild(dc);
+      const by = el("td", "", a.actor || "–");
+      const src = { "demo-auswahl": "src_demo", cli: "src_cli", "auto-approve": "src_cli" }[a.actor_source];
+      if (src) by.appendChild(el("span", "src", t(src)));
+      tr.appendChild(by);
+      tr.appendChild(el("td", "", a.reason || "–"));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody); box.appendChild(table);
+  }
+
+  /* ---------- statistics, aggregated from the run log ---------- */
+  let lastStats = null;
+  async function loadStats() {
+    try { lastStats = await api("/api/metrics"); } catch (_) { lastStats = "offline"; }
+    renderStats();
+  }
+  function renderStats() {
+    const box = $("stats"); if (lastStats === null) return; box.replaceChildren();
+    if (lastStats === "offline") { box.appendChild(el("div", "empty", t("historyOffline"))); return; }
+    const m = lastStats;
+    if (!m.total_runs) { box.appendChild(el("div", "empty", t("noRuns"))); return; }
+    const grid = el("div", "stats");
+    const card = (v, k, d) => { const c = el("div", "stat"); c.append(el("div", "v", String(v)), el("div", "k", k)); if (d) c.appendChild(el("div", "d", d)); grid.appendChild(c); };
+    card(m.total_runs, t("statTotal"), t("statDryFull", { d: m.dry_runs, f: m.full_runs }));
+    card(m.by_status.done, t("statDone")); card(m.by_status.failed, t("statFailed")); card(m.by_status.cancelled, t("statCancelled"));
+    card(m.avg_duration_seconds != null ? m.avg_duration_seconds + "s" : "–", t("statAvg"));
+    card(m.avg_duration_full_done_seconds != null ? m.avg_duration_full_done_seconds + "s" : "–", t("statAvgFull"));
+    card(m.needed_repair, t("statRepair"), t("statOf", { n: m.repair_known }));
+    card(m.judge_warnings, t("statJudge"), t("statOf", { n: m.judge_reviewed }));
+    box.append(grid, el("div", "stats-note", t("statsNote", { s: m.since ? new Date(m.since).toLocaleDateString(lang === "de" ? "de-DE" : "en-GB") : "–" })));
   }
 
   /* ---------- voice input: record 5s in the browser, the server transcribes via Whisper ---------- */

@@ -9,21 +9,25 @@ import getpass
 import json
 import logging
 import re
+import threading
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from typing import Callable
 
 from jarvis.clients.minio_client import MinioClient
 from jarvis.config import JarvisConfig
 from jarvis.models.plan import Plan
+from jarvis.audit import record_feedback
 from jarvis.models.review import ReviewResult
+from jarvis.models.ticket import priority_label
 from jarvis.models.run import RunResult
 from jarvis.progress import ProgressTracker
 from jarvis.state import STATE_LABELS_DE, RunState, StateMachine
 from jarvis.steps.code_change import code_change as generate_code_change
 from jarvis.steps.create_pr import create_pr
 from jarvis.steps.find_repo import choose_repo
-from jarvis.steps.jira_comment import jira_comment, jira_failure_comment, jira_plan_comment
+from jarvis.steps.jira_comment import jira_comment, jira_failure_comment, jira_plan_comment, mark_in_progress
 from jarvis.steps.notify import notify, notify_failure, notify_plan
 from jarvis.steps.plan import create_plan
 from jarvis.steps.read_repo import read_repo, remove_clone
@@ -75,9 +79,12 @@ def execute_run(
     )
 
     repo_map = None
+    marked = None  # ticket key carrying the jarvis-in-progress label, removed in `finally`
     try:
         machine.transition(RunState.READ_TICKET)
         ticket = read_ticket(ticket_id, config)
+        logger.info("ticket %s priority=%s", ticket.key, ticket.priority or "-")
+        tracker.note(f"Priorität: {priority_label(ticket.priority) or 'nicht gesetzt'}")
         say(f"Ich habe das Ticket {ticket.key} gelesen: {ticket.summary}. Ich erstelle jetzt einen Plan.")
 
         machine.transition(RunState.FIND_REPO)
@@ -89,6 +96,9 @@ def execute_run(
         repo_map = read_repo(repo_full_name, config)
 
         machine.transition(RunState.PLAN)
+        if not dry_run:  # visible in Jira from here on; dry runs never write to Jira
+            mark_in_progress(ticket.key, config, True)
+            marked = ticket.key
         plan = create_plan(ticket, repo_map, config)
         result.plan = plan
         _announce_plan(ticket, plan, run_id, config, tracker, post_to_jira=not dry_run)
@@ -132,6 +142,8 @@ def execute_run(
         result.ended_at = datetime.now(timezone.utc).isoformat()
         if repo_map is not None:  # the clone is only needed during the run
             remove_clone(repo_map.local_path)
+        if marked:  # whatever the outcome: done, cancelled or failed
+            mark_in_progress(marked, config, False)
 
     return result
 
@@ -258,6 +270,12 @@ def _code_test_review_pr(
         tracker.note(f"Judge review failed, PR will carry a warning: {exc}")
         review_result = ReviewResult(passed=False, findings=f"⚠️ Judge review failed ({exc}) — bitte manuell reviewen.")
     result.review_result = review_result
+    if not review_result.passed:  # V1 feedback data, collection only; best effort, runs in the background
+        try:
+            record_feedback("judge_warning", ticket_id=ticket.key, run_id=run_id, plan=plan,
+                            reason=review_result.findings, minio_settings=config.minio)
+        except Exception:
+            logger.exception("could not record judge feedback")
 
     machine.transition(RunState.CREATE_PR)
 
@@ -291,5 +309,72 @@ def _code_test_review_pr(
     say(f"Fertig. Pull Request {_pr_label(pr_result.url)} geöffnet. {test_result.passed_count} Tests bestanden.")
 
     machine.transition(RunState.NOTIFY)
-    jira_comment(ticket, pr_result, test_result, review_result, run_id, config)
-    notify(ticket, pr_result, test_result, review_result, config)
+    repairs = result.repair_result.attempts if result.repair_result else 0
+    jira_comment(ticket, pr_result, test_result, review_result, run_id, config, repairs=repairs)
+    notify(ticket, pr_result, test_result, review_result, config, repairs=repairs)
+
+
+class RunQueue:
+    """One run at a time per person; runs of different people run in parallel.
+
+    A run for someone who already has an active run waits here and starts, in order, when that
+    run ends. The key is the ticket's Jira assignee ("unassigned" when unknown). In-memory only:
+    a restart drops queued runs (the console then shows them as unknown).
+
+    This only keeps one person's runs from stepping on each other. It is NOT a global limit:
+    how many parallel runs the LiteLLM / GPU backend can really sustain still needs load
+    testing (V1), and there is no total cap or rate limit yet.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active: dict[str, str] = {}                                   # person -> run_id
+        self._waiting: dict[str, deque[tuple[str, Callable[[], None]]]] = {}
+
+    def submit(self, person: str, run_id: str, start: Callable[[], None]) -> int:
+        """Start now (returns 0) or queue (returns the 1-based position in this person's queue)."""
+        with self._lock:
+            if person not in self._active:
+                self._active[person] = run_id
+                position = 0
+            else:
+                self._waiting.setdefault(person, deque()).append((run_id, start))
+                position = len(self._waiting[person])
+        if position == 0:
+            self._launch(person, run_id, start)
+        return position
+
+    def finished(self, person: str, run_id: str) -> None:
+        """Called when a run ends (always, also after errors): start this person's next run."""
+        with self._lock:
+            if self._active.get(person) != run_id:
+                return
+            queue = self._waiting.get(person)
+            if queue:
+                next_id, next_start = queue.popleft()
+                self._active[person] = next_id
+                if not queue:
+                    del self._waiting[person]
+            else:
+                del self._active[person]
+                return
+        self._launch(person, next_id, next_start)
+
+    def position(self, run_id: str) -> int:
+        with self._lock:
+            for queue in self._waiting.values():
+                for i, (rid, _) in enumerate(queue, 1):
+                    if rid == run_id:
+                        return i
+        return 0
+
+    def counts(self) -> dict[str, int]:
+        with self._lock:
+            return {"active": len(self._active), "queued": sum(len(q) for q in self._waiting.values())}
+
+    def _launch(self, person: str, run_id: str, start: Callable[[], None]) -> None:
+        try:
+            start()
+        except Exception:  # a start that fails must not block the person's queue forever
+            logger.exception("run %s could not be started", run_id)
+            self.finished(person, run_id)

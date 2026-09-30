@@ -13,8 +13,20 @@ logger = logging.getLogger("jarvis.jira")
 
 # Acceptance criteria are custom fields whose ids differ per Jira site; match them by name.
 _ACCEPTANCE_FIELD_NAMES = ("acceptance criteria", "akzeptanzkriterien")
-# Comments JARVIS wrote itself are not context for the planner.
-JARVIS_COMMENT_PREFIXES = ("🤖 JARVIS Plan Ready", "JARVIS hat einen Draft PR", "JARVIS could not complete")
+# Comments JARVIS wrote itself are not context for the planner (current formats and the ones before 30.09.2026).
+JARVIS_COMMENT_PREFIXES = (
+    "🧭 JARVIS", "🔗 JARVIS", "❌ JARVIS", "✅ JARVIS",
+    "🤖 JARVIS Plan Ready", "JARVIS hat einen Draft PR", "JARVIS could not complete",
+)
+# Set while a full run works on the ticket; removed when the run ends, whatever the outcome.
+IN_PROGRESS_LABEL = "jarvis-in-progress"
+PANEL_TYPES = ("info", "note", "success", "warning", "error")
+
+
+def is_jarvis_comment(body: str) -> bool:
+    """First line carries a JARVIS marker; it may follow an @mention (batch summaries mention the assignee)."""
+    first = body.lstrip().split("\n", 1)[0]
+    return any(prefix in first for prefix in JARVIS_COMMENT_PREFIXES)
 
 
 class JiraClient:
@@ -29,7 +41,7 @@ class JiraClient:
             acceptance_ids = self._acceptance_field_ids(client)
             response = client.get(
                 url,
-                params={"fields": ",".join(["summary", "description", "issuetype", "status", "labels", "comment",
+                params={"fields": ",".join(["summary", "description", "issuetype", "status", "labels", "comment", "priority", "assignee",
                                             *acceptance_ids])},
             )
         response.raise_for_status()
@@ -56,7 +68,10 @@ class JiraClient:
             labels=fields.get("labels", []),
             url=f"{self._base_url}/browse/{data['key']}",
             acceptance_criteria=acceptance,
-            comments=[c for c in comments if c.body.strip() and not c.body.startswith(JARVIS_COMMENT_PREFIXES)],
+            priority=(fields.get("priority") or {}).get("name", ""),
+            assignee_id=(fields.get("assignee") or {}).get("accountId", ""),
+            assignee_name=(fields.get("assignee") or {}).get("displayName", ""),
+            comments=[c for c in comments if c.body.strip() and not is_jarvis_comment(c.body)],
         )
 
     def _acceptance_field_ids(self, client: httpx.Client) -> list[str]:
@@ -72,11 +87,12 @@ class JiraClient:
     def search_open(self, project: str, limit: int = 50, assignee_id: str | None = None) -> list[JiraTicket]:
         """Open (not Done) tickets of a project, newest first. `project` and `assignee_id` must be validated."""
         who = f' AND assignee = "{assignee_id}"' if assignee_id else ""
-        jql = f"project = {project}{who} AND statusCategory != Done ORDER BY created DESC"
+        # Board rank first; callers then sort by priority (stable, so rank decides within one priority).
+        jql = f"project = {project}{who} AND statusCategory != Done ORDER BY Rank ASC, created DESC"
         with httpx.Client(auth=self._auth, timeout=30) as client:
             response = client.get(
                 f"{self._base_url}/rest/api/3/search/jql",
-                params={"jql": jql, "maxResults": limit, "fields": "summary,issuetype,status,labels,assignee"},
+                params={"jql": jql, "maxResults": limit, "fields": "summary,issuetype,status,labels,assignee,priority"},
             )
         response.raise_for_status()
         return [
@@ -90,6 +106,7 @@ class JiraClient:
                 url=f"{self._base_url}/browse/{issue['key']}",
                 assignee_id=(issue["fields"].get("assignee") or {}).get("accountId", ""),
                 assignee_name=(issue["fields"].get("assignee") or {}).get("displayName", ""),
+                priority=(issue["fields"].get("priority") or {}).get("name", ""),
             )
             for issue in response.json().get("issues", [])
         ]
@@ -140,16 +157,35 @@ class JiraClient:
             status="", url=f"{self._base_url}/browse/{key}",
         )
 
-    def add_comment(self, issue_key: str, text: str) -> None:
+    def add_comment(self, issue_key: str, text: str, *, panel: str | None = None, mention: str | None = None) -> None:
+        """`panel` (info, success, warning, error, note) frames the comment in a coloured Jira panel;
+        `mention` is an accountId put in front of the first line, which makes Jira notify that person."""
         url = f"{self._base_url}/rest/api/3/issue/{issue_key}/comment"
         # One paragraph per line: a "\n" inside a single ADF text node is not shown as a line break.
         paragraphs = [
             {"type": "paragraph", "content": [{"type": "text", "text": line}]} if line.strip() else {"type": "paragraph"}
             for line in text.splitlines()
         ]
+        if mention and paragraphs:
+            paragraphs[0].setdefault("content", []).insert(0, {"type": "mention", "attrs": {"id": mention}})
+            paragraphs[0]["content"].insert(1, {"type": "text", "text": " "})
+        if panel in PANEL_TYPES:
+            paragraphs = [{"type": "panel", "attrs": {"panelType": panel}, "content": paragraphs}]
         body = {"body": {"type": "doc", "version": 1, "content": paragraphs}}
         with httpx.Client(auth=self._auth, timeout=30) as client:
             response = client.post(url, json=body)
+        response.raise_for_status()
+
+    def set_label(self, issue_key: str, label: str, present: bool) -> None:
+        """Add or remove one label without touching the others (idempotent both ways)."""
+        url = f"{self._base_url}/rest/api/3/issue/{issue_key}"
+        body = {"update": {"labels": [{"add" if present else "remove": label}]}}
+        with httpx.Client(auth=self._auth, timeout=15) as client:
+            # A label is a marker, not news: no e-mail for it. Suppressing mails needs project admin rights,
+            # so without them (403) the change is made with Jira's default notification.
+            response = client.put(url, params={"notifyUsers": "false"}, json=body)
+            if response.status_code == 403:
+                response = client.put(url, json=body)
         response.raise_for_status()
 
     def add_attachment(self, issue_key: str, filename: str, content: bytes) -> None:
@@ -227,6 +263,8 @@ def _extract_description(description_field: dict | str | None) -> str:
         node_type = node.get("type")
         if node_type == "text":
             parts.append(node.get("text", ""))
+        elif node_type == "mention":
+            parts.append(node.get("attrs", {}).get("text", "@"))
         elif node_type == "hardBreak":
             parts.append("\n")
         elif node_type == "listItem":

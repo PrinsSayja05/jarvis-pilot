@@ -1,12 +1,15 @@
 """CLI entry point: python -m jarvis WM-431 --dry-run   |   python -m jarvis console"""
 from __future__ import annotations
 
+import getpass
 import logging
+import time
 import uuid
 from typing import Optional
 
 import typer
 
+from jarvis import audit
 from jarvis.clients.github_client import log_auth_mode
 from jarvis.config import ConfigError, JarvisConfig, load_config
 from jarvis.models.run import RunResult
@@ -50,6 +53,35 @@ def _voice_approve(config: JarvisConfig):
         return request_approval(plan)[0]
 
     return approve
+
+
+def _audited(approve, run_id: str, dry_run: bool, config: JarvisConfig, *, source: str):
+    """Same decision as `approve`; afterwards it is written to the approval log (and a rejection to feedback)."""
+    def wrapped(plan, ticket_id: str) -> bool:
+        approved = approve(plan, ticket_id)
+        try:
+            audit.record_approval(run_id=run_id, ticket_id=ticket_id, decision="approved" if approved else "rejected",
+                                  actor=getpass.getuser(), actor_source=source, risk_class=plan.risk_class, dry_run=dry_run)
+            if not approved and source != "auto-approve":  # a rule refusing a high-risk plan is not human feedback
+                audit.record_feedback("plan_rejected", ticket_id=ticket_id, run_id=run_id, plan=plan,
+                                      reason="(im Terminal abgelehnt, kein Grund erfasst)", minio_settings=config.minio,
+                                      extra={"actor": getpass.getuser(), "actor_source": source, "dry_run": dry_run})
+        except Exception:
+            logger.exception("could not write the approval audit")
+        return approved
+    return wrapped
+
+
+def _log_run(result: RunResult, dry_run: bool, duration: float) -> None:
+    status = {RunState.FAILED: "failed", RunState.CANCELLED: "cancelled"}.get(result.state, "done")
+    audit.record_run({
+        "run_id": result.run_id, "ticket_id": result.ticket_id, "dry_run": dry_run, "status": status,
+        "started_at": result.started_at, "duration_seconds": round(duration, 1), "source": "cli",
+        "pr_url": result.pr_result.url if result.pr_result else None, "approved": result.approved,
+        "risk_class": result.plan.risk_class if result.plan else None,
+        "repair_attempts": (result.repair_result.attempts if result.repair_result else 0) if not dry_run else None,
+        "judge_warning": (not result.review_result.passed) if result.review_result else None,
+    })
 
 
 def _cli_approve(plan, ticket_id: str) -> bool:
@@ -145,7 +177,9 @@ def run(
         approve = _cli_approve
 
     run_id = str(uuid.uuid4())
+    approve = _audited(approve, run_id, dry_run, config, source="auto-approve" if auto_approve else "cli")
     tracker = ProgressTracker(run_id, ticket_id, demo=demo, speak=narrate)
+    started = time.monotonic()
     result = execute_run(
         ticket_id,
         config,
@@ -156,6 +190,8 @@ def run(
         auto_approved=auto_approve,
         narrate=narrate,
     )
+
+    _log_run(result, dry_run, time.monotonic() - started)
 
     if demo:
         print_banner("DEMO COMPLETE", style="bold green")

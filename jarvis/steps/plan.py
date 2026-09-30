@@ -6,7 +6,7 @@ import json
 from jarvis.clients.litellm_client import LiteLLMClient
 from jarvis.config import JarvisConfig
 from jarvis.models.plan import FileChange, Plan
-from jarvis.models.ticket import JiraTicket
+from jarvis.models.ticket import JiraTicket, is_urgent
 from jarvis.steps.read_repo import RepoMap
 
 _SYSTEM_PROMPT = """You are a senior software engineer planning a code change.
@@ -27,6 +27,15 @@ _MAX_COMMENTS = 10  # the most recent ones
 _MAX_COMMENT_CHARS = 1000
 
 
+_URGENT_RULES = """
+
+This ticket has HIGH or HIGHEST priority. Plan conservatively:
+- prefer the smallest safe change that fulfils the acceptance criteria, no refactoring on the side;
+- start the approach with one sentence that names the main risk of this change explicitly;
+- if in doubt between two risk classes, choose the higher one."""
+_RISK_UP = {"low": "medium", "medium": "high"}
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + " … (truncated)"
 
@@ -35,6 +44,7 @@ def _ticket_context(ticket: JiraTicket) -> str:
     parts = [
         f"Ticket {ticket.key} ({ticket.issue_type or 'issue'}, status: {ticket.status or '?'}): {ticket.summary}",
         f"Labels: {', '.join(ticket.labels) if ticket.labels else 'none'}",
+        f"Priority: {ticket.priority or 'not set'}",
         f"Description:\n{_clip(ticket.description, _MAX_DESCRIPTION_CHARS) or '(none)'}",
         f"Acceptance criteria:\n{_clip(ticket.acceptance_criteria, _MAX_DESCRIPTION_CHARS) or '(none given)'}",
     ]
@@ -56,10 +66,11 @@ def create_plan(ticket: JiraTicket, repo_map: RepoMap, config: JarvisConfig) -> 
         f"Files ({len(repo_map.files)}):\n" + "\n".join(repo_map.files[:200])
     )
 
+    system = _SYSTEM_PROMPT + (_URGENT_RULES if is_urgent(ticket.priority) else "")
     result = client.complete(
         model_alias=config.models.planner,
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": user_prompt},
         ],
         response_format={"type": "json_object"},
@@ -67,11 +78,16 @@ def create_plan(ticket: JiraTicket, repo_map: RepoMap, config: JarvisConfig) -> 
 
     data = json.loads(result.content)
 
+    files = [FileChange(**fc) for fc in data["files_to_change"]]
+    risk = data["risk_class"]
+    if is_urgent(ticket.priority) and len(files) > 2:
+        # urgent + wide change: one risk class up (high then needs the typed confirmation, never a voice "ja")
+        risk = _RISK_UP.get(risk, risk)
     return Plan(
-        files_to_change=[FileChange(**fc) for fc in data["files_to_change"]],
+        files_to_change=files,
         approach=data["approach"],
         test_plan=data["test_plan"],
-        risk_class=data["risk_class"],
+        risk_class=risk,
         estimated_tokens=result.prompt_tokens + result.completion_tokens,
         latency_seconds=result.latency_seconds,
     )
